@@ -131,6 +131,11 @@ export interface ProbeStreamFn {
   (url: string, headers: Record<string, string>): Promise<{ format: string; finalUrl: string } | null>
 }
 
+/**
+ * 仅用于非网关URL的格式探测（HEAD请求，安全无副作用）
+ * 网关URL（PHP redirectors with one-time TOKENs）的格式由 guessFormatFromGatewayPath 推断，
+ * 不经过此函数，避免消耗一次性TOKEN。
+ */
 export async function probeFinalFormat(
   url: string,
   headers: Record<string, string>,
@@ -143,7 +148,6 @@ export async function probeFinalFormat(
         return { format: result.format, finalUrl: result.finalUrl || url }
       }
     } catch (_e) {
-      // probeStream failed, continue with HEAD probe
     }
   }
 

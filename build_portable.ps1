@@ -400,6 +400,15 @@ if (Test-Path $sourcesFile) {
     Write-Host "  WARNING: sources.json not found, app will launch with empty source list" -ForegroundColor Yellow
 }
 
+# --- 5c2. 复制 verified_channels.json (本地直播源频道) ---
+$verifiedChannelsFile = Join-Path $scriptDir "verified_channels.json"
+if (Test-Path $verifiedChannelsFile) {
+    Copy-Item $verifiedChannelsFile -Destination $OutputDir -Force
+    Write-Host "  Copied: verified_channels.json" -ForegroundColor Gray
+} else {
+    Write-Host "  WARNING: verified_channels.json not found, local channels will start empty" -ForegroundColor Yellow
+}
+
 # --- 5d. 复制 package.json (只保留必要字段) ---
 $pkgJson = Get-Content (Join-Path $scriptDir "package.json") -Raw | ConvertFrom-Json
 $minimalPkg = @{

@@ -87,10 +87,14 @@
         @contextmenu.prevent="closeContextMenu"
       >
         <div
-          class="context-menu"
-          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
-          @click.stop
-        >
+        ref="contextMenuRef"
+        class="context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        tabindex="-1"
+        @click.stop
+        @keydown="onContextMenuKeydown"
+        @wheel="onContextMenuWheel"
+      >
           <div class="ctx-menu-header">
             <span class="ctx-menu-title">{{ contextMenu.channel?.channelName }}</span>
             <span class="ctx-menu-num" v-if="contextMenu.channel">#{{ contextMenu.channel.channelNum }}</span>
@@ -152,8 +156,8 @@ const searchText = ref('')
 const activeSubLine = ref(0)
 const activeCategory = ref(0)
 const currentChannelEl = ref<HTMLElement | null>(null)
+const contextMenuRef = ref<HTMLElement | null>(null)
 
-// 右键菜单状态
 const contextMenu = reactive({
   visible: false,
   x: 0,
@@ -177,10 +181,31 @@ function onContextMenu(e: MouseEvent, channel: LiveChannelItem) {
   contextMenu.x = x
   contextMenu.y = y
   contextMenu.visible = true
+  nextTick(() => {
+    contextMenuRef.value?.focus()
+  })
 }
 
 function closeContextMenu() {
   contextMenu.visible = false
+}
+
+function onContextMenuKeydown(e: KeyboardEvent) {
+  const el = contextMenuRef.value
+  if (!el) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    el.scrollBy({ top: 40, behavior: 'smooth' })
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    el.scrollBy({ top: -40, behavior: 'smooth' })
+  } else if (e.key === 'Escape') {
+    closeContextMenu()
+  }
+}
+
+function onContextMenuWheel(e: WheelEvent) {
+  e.stopPropagation()
 }
 
 async function copyText(text: string) {
@@ -693,12 +718,28 @@ function updateActiveSelection() {
   z-index: 10000;
   min-width: 220px;
   max-width: 360px;
+  max-height: 70vh;
+  overflow-y: auto;
   background: #1e1e32;
   border: 1px solid #3a3a5a;
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   padding: 6px;
   font-size: 13px;
+  outline: none;
+}
+
+.context-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.context-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.context-menu::-webkit-scrollbar-thumb {
+  background: #3a3a5a;
+  border-radius: 2px;
 }
 
 .ctx-menu-header {

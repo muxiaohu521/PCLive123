@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearChannelCache: () => ipcRenderer.invoke('clear-channel-cache'),
 
   fetchUrl: (url, headers) => ipcRenderer.invoke('fetch-url', url, headers || {}),
+  fetchUrlSpider: (url, headers) => ipcRenderer.invoke('fetch-url-spider', url, headers || {}),
 
   probeStream: (url, headers) => ipcRenderer.invoke('probe-stream', url, headers || {}),
   createStreamSession: (url, headers, detectedFormat) => ipcRenderer.invoke('create-stream-session', url, headers || {}, detectedFormat || null),
@@ -82,4 +83,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   serveLocalFile: (filePath) => ipcRenderer.invoke('local-file:serve', filePath),
   closeLocalFileServer: (token) => ipcRenderer.invoke('local-file:close', token),
+
+  readLocalChannels: () => ipcRenderer.invoke('local-channels:read'),
+  writeLocalChannels: (data) => ipcRenderer.invoke('local-channels:write', data),
 })

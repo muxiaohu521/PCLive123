@@ -118,7 +118,7 @@ let lastLoadHeaders: Record<string, string> = {}
 const MAX_RETRIES_PER_LINE = 3
 const SOURCE_TIMEOUT_MS = 10000
 let loadGenerationId = 0
-let lastPlayMode: 'local' | 'channel' | 'sniffer' | null = null
+let lastPlayMode: 'local' | 'channel' | 'sniffer' | 'locallive' | null = null
 let lastDecodeMode: string | null = null
 let _mpegtsWatchdog: ReturnType<typeof setTimeout> | null = null
 let _stallWatchdog: ReturnType<typeof setTimeout> | null = null
@@ -234,6 +234,8 @@ function updateSourceLabel(): void {
   if (!sourceInfoEl) return
   if (store.activePlayMode === 'channel') {
     sourceInfoEl.textContent = `线路 ${props.info.sourceIndex + 1}/${props.info.sourceNum}`
+  } else if (store.activePlayMode === 'locallive') {
+    sourceInfoEl.textContent = `线路 ${props.info.sourceIndex + 1}/${props.info.sourceNum}`
   } else if (store.activePlayMode === 'local') {
     sourceInfoEl.textContent = `视频 ${props.info.sourceIndex + 1}/${props.info.sourceNum}`
   } else {
@@ -251,19 +253,19 @@ function updateControlLabels(): void {
     if (el) el.style.display = show ? '' : 'none'
   }
 
-  const showChannel = mode === 'local' || mode === 'channel'
+  const showChannel = mode === 'local' || mode === 'channel' || mode === 'locallive'
 
   setDisp('prev-channel', showChannel)
   setDisp('next-channel', showChannel)
-  setDisp('prev-source', mode === 'channel')
-  setDisp('source-info', mode === 'channel')
-  setDisp('next-source', mode === 'channel')
+  setDisp('prev-source', mode === 'channel' || mode === 'locallive')
+  setDisp('source-info', mode === 'channel' || mode === 'locallive')
+  setDisp('next-source', mode === 'channel' || mode === 'locallive')
   setDisp('play-mode', mode === 'local')
 
   if (mode === 'local') {
     const pc = art.controls['prev-channel'] as HTMLElement | undefined; if (pc) pc.setAttribute('title', '上一视频')
     const nc = art.controls['next-channel'] as HTMLElement | undefined; if (nc) nc.setAttribute('title', '下一视频')
-  } else if (mode === 'channel') {
+  } else if (mode === 'channel' || mode === 'locallive') {
     const pc = art.controls['prev-channel'] as HTMLElement | undefined; if (pc) pc.setAttribute('title', '上一频道')
     const nc = art.controls['next-channel'] as HTMLElement | undefined; if (nc) nc.setAttribute('title', '下一频道')
   }
@@ -1942,12 +1944,12 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
       logger.info(`[VideoPlayer] software: .${finalFormat} → 软解 (hls.js/mpegts.js)`)
       art!.type = finalFormat
       startSourceTimeout()
-      art!.switchUrl(realSourceUrl)
+      art!.switchUrl(finalUrl)
     } else if (finalFormat === 'flv') {
       logger.info(`[VideoPlayer] software: .${finalFormat} → 软解 (mpegts.js)`)
       art!.type = finalFormat
       startSourceTimeout()
-      art!.switchUrl(realSourceUrl)
+      art!.switchUrl(finalUrl)
     } else if (isOnlineAudio) {
       logger.info(`[VideoPlayer] software: .${onlineExt} → 软解 (AudioPlayer)`)
       disposeAudioPlayer()
@@ -2118,7 +2120,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     if (genId !== loadGenerationId) return
     art!.type = finalFormat
     startSourceTimeout()
-    art!.switchUrl(realSourceUrl)
+    art!.switchUrl(finalUrl)
     if (getIsMirroring()) restartMirrorStream(art)
     return
   }

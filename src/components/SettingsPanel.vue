@@ -202,6 +202,37 @@
       </div>
 
       <div class="section">
+        <h4 class="section-title">快捷键设置</h4>
+        <div
+          v-for="item in shortcutList"
+          :key="item.id"
+          class="setting-row shortcut-row"
+        >
+          <label>{{ item.name }}</label>
+          <div class="shortcut-controls">
+            <button
+              class="shortcut-btn"
+              :class="{ recording: recordingId === item.id }"
+              @click="onShortcutBtnClick(item.id)"
+            >
+              {{ recordingId === item.id ? '按下新快捷键...' : store.formatShortcutDisplay(item.def) }}
+            </button>
+            <button
+              v-if="item.def.key"
+              class="shortcut-clear"
+              title="清除此快捷键"
+              @click="store.clearShortcut(item.id)"
+            >✕</button>
+            <button
+              class="shortcut-reset"
+              title="恢复默认"
+              @click="store.resetShortcut(item.id)"
+            >↺</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
         <h4 class="section-title">数据管理</h4>
         <div class="setting-row">
           <button @click="clearCache" class="btn-danger">清除频道缓存</button>
@@ -221,7 +252,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/store'
 import { DECODE_MODES, DECODE_MODE_LABELS } from '@/constants'
@@ -392,6 +423,43 @@ const extraAdKeywords = ref<string[]>([])
 const removedBuiltinKeywords = ref<string[]>([])
 const newAdHost = ref('')
 const newKeyword = ref('')
+
+// ============ 快捷键设置 ============
+const shortcutList = computed(() => store.getShortcutList())
+const recordingId = ref<string | null>(null)
+
+function onShortcutBtnClick(id: string) {
+  if (recordingId.value === id) {
+    recordingId.value = null
+    return
+  }
+  recordingId.value = id
+}
+
+function onRecordKeydown(e: KeyboardEvent) {
+  if (!recordingId.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  const def = store.shortcutEventToDef(e)
+  if (!def.key) return // 忽略纯修饰键
+  store.setShortcut(recordingId.value, def)
+  recordingId.value = null
+}
+
+onUnmounted(() => {
+  if (recordingId.value) {
+    window.removeEventListener('keydown', onRecordKeydown, true)
+  }
+})
+
+watch(recordingId, (newVal, oldVal) => {
+  if (oldVal && !newVal) {
+    window.removeEventListener('keydown', onRecordKeydown, true)
+  }
+  if (newVal && !oldVal) {
+    window.addEventListener('keydown', onRecordKeydown, true)
+  }
+})
 
 function refreshAdFilterData() {
   allAdHosts.value = getAllAdHosts()
@@ -711,4 +779,73 @@ function restoreBuiltinKw(kw: string) {
 }
 
 .mini-clear-btn:hover { background: #2e1a1a; }
+
+/* 快捷键设置 */
+.shortcut-row {
+  align-items: center;
+  gap: 8px;
+}
+.shortcut-row label {
+  min-width: 100px;
+  flex-shrink: 0;
+}
+.shortcut-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.shortcut-btn {
+  min-width: 130px;
+  padding: 5px 10px;
+  border: 1px solid #3a3a4e;
+  border-radius: 4px;
+  background: #1e1e2e;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+.shortcut-btn:hover {
+  border-color: #5599dd;
+  color: #fff;
+}
+.shortcut-btn.recording {
+  border-color: #e6a817;
+  color: #e6a817;
+  background: #2a2410;
+  animation: pulse-border 1s ease-in-out infinite;
+}
+@keyframes pulse-border {
+  0%, 100% { border-color: #e6a817; }
+  50% { border-color: #ffd700; }
+}
+.shortcut-clear {
+  padding: 5px 8px;
+  border: 1px solid #3a3a4e;
+  border-radius: 4px;
+  background: transparent;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.shortcut-clear:hover {
+  border-color: #e04040;
+  color: #e04040;
+}
+.shortcut-reset {
+  padding: 5px 8px;
+  border: 1px solid #3a3a4e;
+  border-radius: 4px;
+  background: transparent;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.shortcut-reset:hover {
+  border-color: #5599dd;
+  color: #5599dd;
+}
 </style>

@@ -53,7 +53,7 @@ export default defineConfig({
             path: parsed.pathname + parsed.search,
             method: 'GET',
             headers: {
-              'User-Agent': 'okhttp/3.15',
+              'User-Agent': 'AptvPlayer-UA',
               'Accept': '*/*',
               'Accept-Language': 'zh-CN,zh;q=0.9',
               'Accept-Encoding': 'gzip, deflate',

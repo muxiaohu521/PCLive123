@@ -30,6 +30,10 @@
           @close="store.showLocalVideoList = false"
           @select="onLocalVideoSelect"
         />
+        <LocalChannelsList
+          v-if="store.showLocalChannelsList"
+          @close="store.showLocalChannelsList = false"
+        />
         <ChannelList
           v-if="store.showChannelList"
           @select="onSelectChannel"
@@ -64,12 +68,34 @@
         </div>
       </div>
     </div>
+
+    <!-- 输入框右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="inputMenu.visible"
+        class="input-context-overlay"
+        @click="hideInputMenu"
+        @contextmenu.prevent="hideInputMenu"
+      >
+        <div
+          class="input-context-menu"
+          :style="{ left: inputMenu.x + 'px', top: inputMenu.y + 'px' }"
+          @click.stop
+        >
+          <div class="menu-item" @click="cutSelection">剪切</div>
+          <div class="menu-item" @click="copySelection">复制</div>
+          <div class="menu-item" @click="pasteText">粘贴</div>
+          <div class="menu-item" @click="selectAllText">全选</div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onErrorCaptured } from 'vue'
 import { useAppStore } from '@/store'
+import { useInputContextMenu } from '@/composables/useInputContextMenu'
 import { logger } from '@/utils/logger'
 import type { LiveChannelItem } from '@/models/LiveChannelItem'
 import type { LocalVideoItem } from '@/constants'
@@ -84,8 +110,19 @@ import DlnaPanel from '@/components/DlnaPanel.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import FloatView from '@/views/FloatView.vue'
 import LocalVideoList from '@/components/LocalVideoList.vue'
+import LocalChannelsList from '@/components/LocalChannelsList.vue'
 
 const store = useAppStore()
+const {
+  menu: inputMenu,
+  hideMenu: hideInputMenu,
+  copySelection,
+  cutSelection,
+  pasteText,
+  selectAll: selectAllText,
+  registerGlobalListener,
+  unregisterGlobalListener,
+} = useInputContextMenu()
 const appRef = ref<HTMLElement | null>(null)
 const videoPlayerRef = ref<InstanceType<typeof VideoPlayer>>()
 const isFloatMode = ref(window.location.hash === '#/float')
@@ -98,6 +135,13 @@ const sourceInfo = computed(() => {
     return {
       sourceIndex: store.currentChannel?.sourceIndex ?? 0,
       sourceNum: store.currentChannel?.sourceNum ?? 0
+    }
+  }
+  if (store.activePlayMode === 'locallive') {
+    const info = store.localChannelCurrentInfo
+    return {
+      sourceIndex: store.localLiveChannelSourceIndex ?? 0,
+      sourceNum: info?.urls?.length ?? 0
     }
   }
   if (store.activePlayMode === 'local') {
@@ -117,6 +161,9 @@ const bottomBarTitle = computed(() => {
   if (store.activePlayMode === 'local' && store.currentLocalVideo) {
     return store.currentLocalVideo.name
   }
+  if (store.activeLocalLiveChannelIndex >= 0 && store.localChannelCurrentInfo) {
+    return store.localChannelCurrentInfo.name
+  }
   if (store.activePlayMode === 'sniffer' && store.currentUrl) {
     return 'URL 嗅探'
   }
@@ -124,11 +171,19 @@ const bottomBarTitle = computed(() => {
 })
 
 function onPrevSource() {
+  if (store.activePlayMode === 'locallive') {
+    store.switchLocalLivePrevSource()
+    return
+  }
   if (store.activePlayMode !== 'channel') return
   store.switchPrevSource()
 }
 
 function onNextSource() {
+  if (store.activePlayMode === 'locallive') {
+    store.switchLocalLiveNextSource()
+    return
+  }
   if (store.activePlayMode !== 'channel') return
   store.switchNextSource()
 }
@@ -147,6 +202,10 @@ function onPrevChannel() {
     navigateChannel(-1)
     return
   }
+  if (store.activeLocalLiveChannelIndex >= 0) {
+    store.playPrevLocalLiveChannel()
+    return
+  }
   if (store.activePlayMode !== 'local') return
 
   const prevUrl = store.currentLocalVideo ? filePathToUrl(store.currentLocalVideo.filePath) : null
@@ -163,6 +222,10 @@ function onPrevChannel() {
 function onNextChannel() {
   if (store.activePlayMode === 'channel') {
     navigateChannel(1)
+    return
+  }
+  if (store.activeLocalLiveChannelIndex >= 0) {
+    store.playNextLocalLiveChannel()
     return
   }
   if (store.activePlayMode !== 'local') return
@@ -196,6 +259,8 @@ function findFlatIndex(): number {
 onMounted(async () => {
   await store.initSources()
   await store.loadChannels()
+  store.loadLocalChannels()
+  registerGlobalListener()
 
   appRef.value?.focus()
   window.addEventListener('keydown', onKeyDown)
@@ -207,6 +272,7 @@ onUnmounted(() => {
     clearTimeout(hideTimer)
     hideTimer = null
   }
+  unregisterGlobalListener()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('beforeunload', onBeforeUnload)
 })
@@ -233,16 +299,9 @@ function onMouseMove() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  switch (e.key) {
-    case 'F5':
-      e.preventDefault()
-      if (store.activePlayMode === 'channel') store.refreshCurrentSource()
-      break
-    case 'F11':
-      e.preventDefault()
-      toggleFullscreen()
-      break
-    case 'Escape':
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    if (store.matchShortcut(e, 'escape')) {
       store.showChannelList = false
       store.showSourceManager = false
       store.showLivesPanel = false
@@ -250,100 +309,152 @@ function onKeyDown(e: KeyboardEvent) {
       store.showDlna = false
       store.showSettings = false
       store.showLocalVideoList = false
-      break
-    case 'Tab':
-      e.preventDefault()
-      store.showChannelList = !store.showChannelList
-      if (store.showChannelList) {
-        store.showSourceManager = false
-        store.showLivesPanel = false
-        store.showLocalVideoList = false
-      }
-      break
-    case 's':
-    case 'S':
-      if (e.ctrlKey) {
-        e.preventDefault()
-        store.showSourceManager = !store.showSourceManager
-        if (store.showSourceManager) {
-          store.showChannelList = false
-          store.showLivesPanel = false
-          store.showLocalVideoList = false
-        }
-      }
-      break
-    case 'l':
-    case 'L':
-      e.preventDefault()
-      store.showLivesPanel = !store.showLivesPanel
-      if (store.showLivesPanel) {
-        store.showChannelList = false
-        store.showSourceManager = false
-        store.showLocalVideoList = false
-      }
-      break
-    case 'v':
-    case 'V':
-      e.preventDefault()
-      store.showLocalVideoList = !store.showLocalVideoList
-      if (store.showLocalVideoList) {
-        store.showChannelList = false
-        store.showSourceManager = false
-        store.showLivesPanel = false
-      }
-      break
-    case 'n':
-    case 'N':
-      if (e.ctrlKey) {
-        e.preventDefault()
-        store.showToolsDialog = !store.showToolsDialog
-        if (store.showToolsDialog) {
-          store.showChannelList = false
-          store.showSourceManager = false
-          store.showLivesPanel = false
-          store.showLocalVideoList = false
-        }
-      }
-      break
-    case 'd':
-    case 'D':
-      if (e.ctrlKey) {
-        e.preventDefault()
-        store.showDlna = !store.showDlna
-        if (store.showDlna) {
-          store.showChannelList = false
-          store.showSourceManager = false
-          store.showToolsDialog = false
-          store.showLocalVideoList = false
-          store.showLivesPanel = false
-        }
-      }
-      break
-    case ',':
-      if (e.ctrlKey) {
-        e.preventDefault()
-        store.showSettings = !store.showSettings
-        if (store.showSettings) {
-          store.showChannelList = false
-          store.showSourceManager = false
-          store.showToolsDialog = false
-          store.showLocalVideoList = false
-          store.showLivesPanel = false
-        }
-      }
-      break
-    case 'ArrowUp':
-      e.preventDefault()
-      onPrevChannel()
-      break
-    case 'ArrowDown':
-      e.preventDefault()
-      onNextChannel()
-      break
-    case ' ':
-      e.preventDefault()
-      togglePlay()
-      break
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'escape')) {
+    store.showChannelList = false
+    store.showSourceManager = false
+    store.showLivesPanel = false
+    store.showToolsDialog = false
+    store.showDlna = false
+    store.showSettings = false
+    store.showLocalVideoList = false
+    store.showLocalChannelsList = false
+    return
+  }
+
+  if (store.matchShortcut(e, 'fullscreen')) {
+    e.preventDefault()
+    toggleFullscreen()
+    return
+  }
+
+  if (store.matchShortcut(e, 'refreshSource')) {
+    e.preventDefault()
+    if (store.activePlayMode === 'channel') store.refreshCurrentSource()
+    return
+  }
+
+  if (store.matchShortcut(e, 'channelList')) {
+    e.preventDefault()
+    store.showChannelList = !store.showChannelList
+    if (store.showChannelList) {
+      store.showSourceManager = false
+      store.showLivesPanel = false
+      store.showLocalVideoList = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'sourceManager')) {
+    e.preventDefault()
+    store.showSourceManager = !store.showSourceManager
+    if (store.showSourceManager) {
+      store.showChannelList = false
+      store.showLivesPanel = false
+      store.showLocalVideoList = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'livesPanel')) {
+    e.preventDefault()
+    store.showLivesPanel = !store.showLivesPanel
+    if (store.showLivesPanel) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showLocalVideoList = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'localVideo')) {
+    e.preventDefault()
+    store.showLocalVideoList = !store.showLocalVideoList
+    if (store.showLocalVideoList) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showLivesPanel = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'localChannels')) {
+    e.preventDefault()
+    store.showLocalChannelsList = !store.showLocalChannelsList
+    if (store.showLocalChannelsList) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showLivesPanel = false
+      store.showLocalVideoList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'toolsDialog')) {
+    e.preventDefault()
+    store.showToolsDialog = !store.showToolsDialog
+    if (store.showToolsDialog) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showLivesPanel = false
+      store.showLocalVideoList = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'dlna')) {
+    e.preventDefault()
+    store.showDlna = !store.showDlna
+    if (store.showDlna) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showToolsDialog = false
+      store.showLocalVideoList = false
+      store.showLivesPanel = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'settings')) {
+    e.preventDefault()
+    store.showSettings = !store.showSettings
+    if (store.showSettings) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showToolsDialog = false
+      store.showLocalVideoList = false
+      store.showLivesPanel = false
+      store.showLocalChannelsList = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'prevChannel')) {
+    e.preventDefault()
+    onPrevChannel()
+    return
+  }
+
+  if (store.matchShortcut(e, 'nextChannel')) {
+    e.preventDefault()
+    onNextChannel()
+    return
+  }
+
+  if (e.key === ' ') {
+    e.preventDefault()
+    togglePlay()
+    return
   }
 
   if (e.key >= '0' && e.key <= '9') {
@@ -514,5 +625,38 @@ body {
 .source-name {
   font-size: 11px;
   color: #aaa;
+}
+
+/* 输入框右键菜单 */
+.input-context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: transparent;
+}
+
+.input-context-menu {
+  position: fixed;
+  z-index: 100000;
+  background: #1e1e2e;
+  border: 1px solid #3a3a4e;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.input-context-menu .menu-item {
+  padding: 7px 16px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+
+.input-context-menu .menu-item:hover {
+  background: rgba(64, 158, 255, 0.15);
+  color: #fff;
 }
 </style>

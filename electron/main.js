@@ -577,6 +577,147 @@ async function fetchUrlWithDns(url, reqHeaders, maxRedirects = 5, timeout = 2000
   })
 }
 
+// Spider-aware fetch: returns full response object with statusCode, headers, content, finalUrl
+// Supports noRedirect mode via X-Spider-No-Redirect header for manual redirect handling
+async function fetchUrlSpider(url, reqHeaders, maxRedirects = 5, timeout = 20000) {
+  if (maxRedirects <= 0) {
+    return { content: '', statusCode: 310, headers: { location: '' }, finalUrl: url }
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return { content: '', statusCode: 400, headers: {}, finalUrl: url }
+  }
+  if (/^https?:\/\/https?:\/\//i.test(url)) {
+    return { content: '', statusCode: 400, headers: {}, finalUrl: url }
+  }
+
+  if (customHosts.size > 0) {
+    for (const [domain, ip] of customHosts) {
+      if (url.includes(domain)) {
+        const replaced = url.replace(domain, ip)
+        logVerbose(`FETCH SPIDER DNS: hosts rewrite ${domain} → ${ip}`)
+        url = replaced
+        break
+      }
+    }
+  }
+
+  // Extract spider control flags from headers
+  const noRedirect = String(reqHeaders['X-Spider-No-Redirect'] || '0') === '1'
+  const spiderMethod = String(reqHeaders['X-Spider-Method'] || 'GET').toUpperCase()
+  const spiderBody = String(reqHeaders['X-Spider-Body'] || '')
+
+  // Clean internal spider headers before sending to server
+  const cleanHeaders = {}
+  for (const [k, v] of Object.entries(reqHeaders)) {
+    const lk = k.toLowerCase()
+    if (!lk.startsWith('x-spider-')) {
+      cleanHeaders[k] = v
+    }
+  }
+
+  const parsed = new URL(url)
+  const startTime = Date.now()
+  return new Promise((resolve, reject) => {
+    const sendHeaders = buildReqHeaders(parsed, cleanHeaders)
+
+    debugLog(`FETCH SPIDER: url=${url} noRedirect=${noRedirect} method=${spiderMethod}`)
+    const protocol = parsed.protocol === 'https:' ? https : http
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: spiderMethod,
+      headers: sendHeaders,
+      timeout: timeout,
+      rejectUnauthorized: false,
+    }
+
+    let reqBodySent = false
+    const req = protocol.request(options, (res) => {
+      const statusCode = res.statusCode || 200
+      const respHeaders = {}
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (v !== undefined && v !== null) {
+          respHeaders[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : String(v)
+        }
+      }
+
+      // Parse Set-Cookie
+      const setCookieData = extractSetCookieHeaders(res.headers)
+      if (setCookieData) {
+        try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
+      }
+
+      // If noRedirect mode and server returned a redirect — return redirect info
+      if (noRedirect && statusCode >= 300 && statusCode < 400 && respHeaders['location']) {
+        debugLog(`FETCH SPIDER: noRedirect, returning ${statusCode} Location=${respHeaders['location'].substring(0, 80)}`)
+        res.resume()
+        resolve({
+          content: '',
+          statusCode,
+          headers: respHeaders,
+          finalUrl: url
+        })
+        return
+      }
+
+      // If normal mode and server returned a redirect — follow it
+      if (!noRedirect && statusCode >= 300 && statusCode < 400 && respHeaders['location']) {
+        const redirectUrl = resolveUrl(parsed.href, respHeaders['location'])
+        debugLog(`FETCH SPIDER: following redirect ${statusCode} → ${redirectUrl.substring(0, 80)} remaining=${maxRedirects}`)
+        res.resume()
+        resolve(fetchUrlSpider(redirectUrl, reqHeaders, maxRedirects - 1, timeout))
+        return
+      }
+
+      const ce = res.headers['content-encoding'] || ''
+      const ct = res.headers['content-type'] || ''
+      const chunks = []
+      res.on('data', c => chunks.push(c))
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks)
+        let raw
+        try {
+          if (ce.includes('gzip')) raw = zlib.gunzipSync(buf)
+          else if (ce.includes('deflate')) raw = zlib.inflateSync(buf)
+          else raw = buf
+        } catch (_) { raw = buf }
+        const stegoText = decodeImageStego(raw, ct)
+        if (stegoText) {
+          debugLog(`FETCH SPIDER: stego extracted ${stegoText.length} chars`)
+          resolve({ content: stegoText, statusCode, headers: respHeaders, finalUrl: url })
+          return
+        }
+        logVerbose(`FETCH SPIDER: completed in ${Date.now() - startTime}ms url=${url} status=${statusCode} size=${raw.length}`)
+        resolve({
+          content: smartDecode(raw, ct),
+          statusCode,
+          headers: respHeaders,
+          finalUrl: url
+        })
+      })
+      res.on('error', (e) => {
+        logError(`FETCH SPIDER: res error for ${url}: ${e.message}`)
+        reject(e)
+      })
+    })
+
+    req.on('error', (e) => {
+      logError(`FETCH SPIDER: req error for ${url}: ${e.message} code=${e.code}`)
+      reject(e)
+    })
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error('timeout'))
+    })
+
+    if (spiderMethod === 'POST' && spiderBody) {
+      req.write(spiderBody)
+    }
+    req.end()
+  })
+}
+
 function buildReqHeaders(parsedUrl, reqHeaders) {
   const hostname = parsedUrl.hostname
   const port = parsedUrl.port
@@ -589,7 +730,7 @@ function buildReqHeaders(parsedUrl, reqHeaders) {
   const defaultOrigin = explicitOrigin || (isBaiduCdn ? 'https://haokan.baidu.com' : origin)
   const headers = {
     'Host': hostHeader,
-    'User-Agent': reqHeaders['User-Agent'] || 'okhttp/3.15',
+    'User-Agent': reqHeaders['User-Agent'] || 'AptvPlayer-UA',
     'Accept': reqHeaders['Accept'] || '*/*',
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'Accept-Encoding': 'gzip, deflate',
@@ -1024,8 +1165,8 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
     if (resolved) return
     resolved = true
     clearTimeout(timeout)
-    logError(`PROXY REQ ERROR depth=${depth}: ${e.message}`)
-    reject(e)
+    logWarn(`PROXY REQ ERROR depth=${depth}: ${e.message}, falling back to Node.js`)
+    doProxyFetchNode(url, sessionHeaders, redirectsLeft, resolve, reject, depth)
   })
 
   req.end()
@@ -1482,7 +1623,7 @@ function probeContentTypeFast(url) {
     const httpMod = parsed.protocol === 'https:' ? https : http
     const req = httpMod.request(parsed, {
       method: 'HEAD',
-      headers: buildReqHeaders(parsed, { 'User-Agent': 'okhttp/3.15' }),
+      headers: buildReqHeaders(parsed, { 'User-Agent': 'AptvPlayer-UA' }),
       rejectUnauthorized: false,
       family: getIpFamily(parsed),
       timeout: 5000,
@@ -1588,7 +1729,7 @@ app.whenReady().then(() => {
 
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     if (!details.requestHeaders['User-Agent']) {
-      details.requestHeaders['User-Agent'] = 'okhttp/3.15'
+      details.requestHeaders['User-Agent'] = 'AptvPlayer-UA'
     }
     // Inject Referer/Origin for registered video CDN domains
     // This is the standard Electron approach — works for <video>, XHR, fetch, etc.
@@ -1690,10 +1831,18 @@ app.whenReady().then(() => {
     } catch { return false }
   })
 
+  function cacheMd5FileForUrl(url) {
+    const crypto = require('crypto')
+    const hash = crypto.createHash('md5').update(url).digest('hex')
+    return path.join(channelCacheDir, `${hash}.json`)
+  }
+
   ipcMain.handle('delete-channel-cache-entry', (_event, url) => {
     try {
       const file = cacheFileForUrl(url)
+      const md5File = cacheMd5FileForUrl(url)
       if (fs.existsSync(file)) fs.unlinkSync(file)
+      if (md5File !== file && fs.existsSync(md5File)) fs.unlinkSync(md5File)
       return true
     } catch { return false }
   })
@@ -1707,6 +1856,55 @@ app.whenReady().then(() => {
       }
       return true
     } catch { return false }
+  })
+
+  // --- Local Channels (本地直播源 verified_channels.json) ---
+  // 与 sources.json 一致：EXE 旁边（便携版）/ 项目根目录（开发版），Vite 零干扰
+  const localChannelsPath = app.isPackaged
+    ? path.join(path.dirname(app.getPath('exe')), 'verified_channels.json')
+    : path.join(__dirname, '..', 'verified_channels.json')
+
+  // 旧路径（首次启动自动迁移）
+  const legacyChannelsPaths = [
+    path.join(__dirname, '..', 'public', 'sources', 'verified_channels.json'),
+    app.isPackaged ? path.join(__dirname, '..', 'dist', 'sources', 'verified_channels.json') : null,
+  ].filter(Boolean)
+
+  function ensureLocalChannelsFile() {
+    if (fs.existsSync(localChannelsPath)) return
+    for (const legacy of legacyChannelsPaths) {
+      if (fs.existsSync(legacy)) {
+        logInfo(`LOCAL-CHANNELS: migrating from ${legacy}`)
+        fs.copyFileSync(legacy, localChannelsPath)
+        return
+      }
+    }
+  }
+
+  ipcMain.handle('local-channels:read', () => {
+    try {
+      ensureLocalChannelsFile()
+      if (fs.existsSync(localChannelsPath)) {
+        const data = JSON.parse(fs.readFileSync(localChannelsPath, 'utf8'))
+        logInfo(`LOCAL-CHANNELS: read ${Array.isArray(data?.lives) ? data.lives.length : 0} channels`)
+        return data
+      }
+      return { lives: [] }
+    } catch (e) {
+      logError(`LOCAL-CHANNELS: read error: ${e.message}`)
+      return { lives: [], error: e.message }
+    }
+  })
+
+  ipcMain.handle('local-channels:write', (_event, data) => {
+    try {
+      fs.writeFileSync(localChannelsPath, JSON.stringify(data, null, 2), 'utf8')
+      logInfo(`LOCAL-CHANNELS: wrote ${Array.isArray(data?.lives) ? data.lives.length : 0} channels`)
+      return true
+    } catch (e) {
+      logError(`LOCAL-CHANNELS: write error: ${e.message}`)
+      return false
+    }
   })
 
   // --- Networking Config IPC ---
@@ -1875,6 +2073,28 @@ app.whenReady().then(() => {
     }
   })
 
+  // --- Spider fetch: returns full response with statusCode, headers, finalUrl ---
+  ipcMain.handle('fetch-url-spider', async (_event, url, headers = {}) => {
+    debugLog(`FETCH SPIDER REQUEST: url=${url}`)
+    if (!/^https?:\/\//i.test(url)) {
+      logWarn(`FETCH SPIDER SKIP (bad URL): ${url}`)
+      return { content: '', statusCode: 400, headers: {}, finalUrl: url }
+    }
+    try {
+      const result = await fetchUrlSpider(url, headers, 8)
+      debugLog(`FETCH SPIDER OK: ${url} status=${result.statusCode} size=${(result.content||'').length}`)
+      return result
+    } catch (e) {
+      logError(`FETCH SPIDER FAIL: ${url} ${e.message}`)
+      return {
+        content: '',
+        statusCode: e?.code || 500,
+        headers: {},
+        finalUrl: url
+      }
+    }
+  })
+
   // --- Probe stream format (ExoPlayer-style auto-detection) ---
   ipcMain.handle('probe-stream', async (_event, url, headers) => {
     logVerbose(`IPC probe-stream: url=${(url||'').substring(0, 80)}`)
@@ -1954,6 +2174,76 @@ app.whenReady().then(() => {
       }
     } catch (e) {
       logWarn('PROBE-STREAM failed: ' + e.message)
+      return { format: 'unknown', contentType: '', finalUrl: url }
+    }
+  })
+
+  // 网关URL格式探测：纯HEAD+重定向跟随，绝不消费body（安全用于一次性TOKEN）
+  ipcMain.handle('probe-gateway-format', async (_event, url, headers) => {
+    logVerbose(`IPC probe-gateway-format: url=${(url||'').substring(0, 80)}`)
+    if (/^rtmp:\/\//i.test(url)) return { format: 'rtmp', contentType: '', finalUrl: url }
+    if (/^rtsp:\/\//i.test(url)) return { format: 'rtsp', contentType: '', finalUrl: url }
+    if (!/^https?:\/\//i.test(url)) return { format: 'unknown', contentType: '', finalUrl: url }
+    try {
+      const probe = await probeContentType(url, headers || {}, true)
+      let format = 'unknown'
+      if (probe.isPlaylist) {
+        format = 'm3u8'
+      } else if (probe.isFlv) {
+        format = 'flv'
+      } else if (probe.contentType && (
+        probe.contentType.includes('video/mp2t') ||
+        probe.contentType.includes('video/mpeg')
+      )) {
+        format = 'ts'
+      } else if (probe.contentType && probe.contentType.includes('video/mp4')) {
+        format = 'mp4'
+      }
+
+      if (format === 'unknown' && probe.finalUrl) {
+        const lower = probe.finalUrl.split('?')[0].split('#')[0].toLowerCase()
+        if (lower.endsWith('.m3u8') || lower.endsWith('.m3u')) format = 'm3u8'
+        else if (lower.endsWith('.flv')) format = 'flv'
+        else if (lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm') || lower.endsWith('.mkv')) format = 'mp4'
+        else if (lower.endsWith('.ts') || lower.endsWith('.m2ts')) format = 'ts'
+      }
+
+      if (format === 'unknown') {
+        try {
+          const p = new URL(url)
+          const pathLower = p.pathname.toLowerCase()
+          const hostLower = p.hostname.toLowerCase()
+          if (/\.php\b/.test(pathLower)) {
+            if (/\/(huya|douyu|yy)\.php\b/.test(pathLower)) format = 'flv'
+            else format = 'm3u8'
+          }
+          if (/^live\.(ottiptv|metshop|iill)\.cc$/.test(hostLower) && /\/(huya|douyu|douyin|yy)\//.test(pathLower)) format = 'flv'
+          if (/\.(ottiptv|metshop|iill)\.cc$/.test(hostLower) && /\/(huya|douyu|douyin|yy)\//.test(pathLower)) format = 'flv'
+          if (/8505255\.xyz$/.test(hostLower)) format = 'm3u8'
+          if (hostLower === 'live.264788.xyz') format = 'm3u8'
+          if (/\.iill\.top$/.test(hostLower)) format = 'm3u8'
+          if (hostLower === 'rihou.cc' && /\/tv\//.test(pathLower)) {
+            const decodedPath = decodeURIComponent(pathLower)
+            if (decodedPath.includes('[mg]')) format = 'm3u8'
+          }
+          if (format === 'unknown' && /(188766|52tb|migu)\.xyz$/i.test(hostLower)) format = 'm3u8'
+          if (format === 'unknown' && /goodiptv\.club$/.test(hostLower) && /\.php\b/.test(pathLower)) format = 'm3u8'
+          if (format === 'unknown' && /cntv\.sbs$/.test(hostLower)) format = 'm3u8'
+          if (format === 'unknown' && /\blitenews\.cn$/.test(hostLower)) format = 'm3u8'
+          if (format === 'unknown' && /\/pltv\//i.test(pathLower)) format = 'm3u8'
+          if (format === 'unknown' && /^\/\d{6,}\//.test(pathLower)) format = 'm3u8'
+        } catch (_) {}
+      }
+
+      return {
+        format,
+        contentType: probe.contentType,
+        finalUrl: probe.finalUrl || url,
+        isPlaylist: probe.isPlaylist,
+        isFlv: probe.isFlv
+      }
+    } catch (e) {
+      logWarn('PROBE-GATEWAY-FORMAT failed: ' + e.message)
       return { format: 'unknown', contentType: '', finalUrl: url }
     }
   })
@@ -2423,10 +2713,14 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
 
     const headerArgs = []
     if (!isLocalFile && headers && typeof headers === 'object') {
+      const headerLines = []
       for (const [k, v] of Object.entries(headers)) {
         if (k && v) {
-          headerArgs.push('-headers', `${k}: ${String(v)}`)
+          headerLines.push(`${k}: ${String(v)}`)
         }
+      }
+      if (headerLines.length > 0) {
+        headerArgs.push('-headers', headerLines.join('\r\n') + '\r\n')
       }
     }
 

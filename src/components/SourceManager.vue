@@ -710,6 +710,7 @@ function extractChannelsFromCurrentGroups(): ExportedChannel[] {
   }
   return channels
 }
+
 </script>
 
 <style scoped>

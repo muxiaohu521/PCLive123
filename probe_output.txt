@@ -1,0 +1,69 @@
+=== 1. 鑾峰彇 HTML ===
+Status: 200 Length: 9249
+API refs: [ 'api/cctvh5' ]
+Script URLs: [
+  'https://s.yangshipin.cn/CCTVVideo/cctvh5-openapi/cctvh5-openapi.min.js?ver=24722',
+  'https://sapi.yangshipin.cn/assets/2022/ysp_account/yspLogin.min.js?ver=240723',
+  'https://sapi.yangshipin.cn/assets/2025/wasm/hls.cmg.js?ver=250813',
+  'https://sapi.yangshipin.cn/assets/2025/wasm/cmg.worker.js?ver=250813',
+  'https://m.yangshipin.cn/static/project/test/player/vr/index.js?t=210'
+]
+
+=== 2. 鎺㈡祴 API 绔偣 ===
+  https://www.yangshipin.cn/api/v1/live/list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/v1/live/channel_list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/v1/tv/channel_list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/v1/channel/list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/v2/live/list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/live/list: HTTP 200, Body length 9249
+  https://www.yangshipin.cn/api/v1/live/category_list: HTTP 200, Body length 9249
+
+=== 3. 鎺㈡祴 CCTV API (澶棰戝簳灞傚彲鑳藉鐢? ===
+  https://vdnad.apps.cntv.cn/api/getHttpStream?pid=CCTV1: HTTP 404, Body <!DOCTYPE html>
+<html>
+<head>
+<title>Error</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>An error occurred.</h1>
+<p>Sorry, the page you are looking for is currently unavailable.<br/>
+
+  https://vdnad.apps.cntv.cn/api/getHttpStream?pid=cctv1: HTTP 404, Body <!DOCTYPE html>
+<html>
+<head>
+<title>Error</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>An error occurred.</h1>
+<p>Sorry, the page you are looking for is currently unavailable.<br/>
+
+  https://vdnad.apps.cntv.cn/api/getHttpStream?pid=cctv1hd: HTTP 404, Body <!DOCTYPE html>
+<html>
+<head>
+<title>Error</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>An error occurred.</h1>
+<p>Sorry, the page you are looking for is currently unavailable.<br/>
+

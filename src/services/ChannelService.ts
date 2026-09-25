@@ -3,6 +3,7 @@ import { createChannel, buildChannelGroup } from '@/models/LiveChannelItem'
 import { APP_CONFIG } from '@/constants'
 import { logger } from '@/utils/logger'
 import { isAdChannelName } from '@/utils/AdFilter'
+import { crawlSourceUrlsFromHtml } from '@/utils/SourceCrawler'
 import type { LiveChannelGroup, LiveSourceGroup, LiveChannelItem } from '@/models/LiveChannelItem'
 import type { Ref } from 'vue'
 
@@ -310,7 +311,17 @@ function extractLivesGroups(jsonStr: string): LiveSourceGroup[] {
 
     if (obj.lives && Array.isArray(obj.lives) && obj.lives.length > 0) {
       for (let idx = 0; idx < obj.lives.length; idx++) {
-        groups.push(buildSourceGroup(obj.lives[idx], idx))
+        const entry = obj.lives[idx]
+        const grp = buildSourceGroup(entry, idx)
+        const pt = Number(entry.playerType) || 2
+        if (defaultSpiderJar && pt === 1 && !grp.spiderApi) {
+          grp.spiderApi = defaultSpiderJar
+          grp.spiderExt = grp.url
+          grp.spiderJar = defaultSpiderJar
+          logger.log('[extractLivesGroups] Spider assigned to live:', grp.name,
+            'spiderApi:', defaultSpiderJar.substring(0, 80))
+        }
+        groups.push(grp)
       }
     }
 
@@ -430,6 +441,10 @@ function extractNetworkingConfig(jsonStr: string): { hosts?: string[]; proxy?: {
 // ============ FETCH DATA (Node native via Electron IPC, no Chromium network stack) ============
 
 async function fetchData(url: string, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<string> {
+  if (!headers['User-Agent'] && !headers['user-agent']) {
+    headers = { ...headers, 'User-Agent': 'okhttp/3.15.0' }
+  }
+
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   if (url.startsWith('data:')) {
     const [, payload] = url.split(',', 2)
@@ -996,9 +1011,12 @@ export const ChannelService = {
     if (signal?.aborted) return []
 
     if (window.electronAPI?.fetchUrl) {
-      const { setFetchUrlFunc } = await import('./SpiderService')
+      const { setFetchUrlFunc, setFetchUrlFullFunc } = await import('./SpiderService')
       setFetchUrlFunc(
         (url: string, hdrs: Record<string, string>) => window.electronAPI!.fetchUrl(url, hdrs)
+      )
+      setFetchUrlFullFunc(
+        (url: string, hdrs: Record<string, string>) => window.electronAPI!.fetchUrlSpider(url, hdrs)
       )
     }
 
@@ -1117,9 +1135,46 @@ export const ChannelService = {
       logger.log('[ChannelService] No TVBox lives found, content format:', format)
 
       if (format === 'html') {
-        logger.error('[ChannelService] Response is HTML, source unavailable:', sourceUrl)
-        logger.error('[ChannelService] → HTML preview:', processedConfig.substring(0, 300).replace(/[\r\n]/g, ' '))
-        return []
+        logger.log('[ChannelService] Response is HTML, attempting to crawl for live source links...')
+        logger.log('[ChannelService] → HTML preview:', processedConfig.substring(0, 300).replace(/[\r\n]/g, ' '))
+
+        try {
+          const crawlResults = crawlSourceUrlsFromHtml(processedConfig, sourceUrl)
+          if (crawlResults.length > 0) {
+            logger.log('[ChannelService] Crawled', crawlResults.length, 'potential source links from HTML:', crawlResults.map(r => r.url))
+            for (const cr of crawlResults) {
+              configLives.push({
+                name: cr.title.substring(0, 80),
+                type: '0',
+                url: cr.url,
+                ua: '',
+                header: {},
+                playerType: 2
+              })
+            }
+            if (configLives.length > 0) {
+              logger.log('[ChannelService] Using', configLives.length, 'crawled links as sub-lines')
+            }
+          } else {
+            logger.log('[ChannelService] No crawlable links found in HTML, will attempt direct parse')
+          }
+        } catch (crawlErr: any) {
+          logger.warn('[ChannelService] HTML crawl failed:', crawlErr?.message || crawlErr)
+        }
+
+        if (configLives.length === 0) {
+          const result = parseLiveData(processedConfig)
+          const totalCh = result.reduce((s, g) => s + g.liveChannels.length, 0)
+          if (totalCh === 0) {
+            logger.error('[ChannelService] HTML source unavailable, no channels found:', sourceUrl)
+            return []
+          }
+          logger.log('[ChannelService] HTML parse success:', result.length, 'groups,', totalCh, 'channels')
+          allGroups.push(...result)
+          lastGroupAddTime = Date.now()
+          await flushSnapshot()
+          return result
+        }
       }
 
       if (format === 'unknown') {
@@ -1135,18 +1190,20 @@ export const ChannelService = {
         }
       }
 
-      const result = parseLiveData(processedConfig)
-      const totalCh = result.reduce((s, g) => s + g.liveChannels.length, 0)
-      if (totalCh === 0) {
-        logger.error('[ChannelService] Direct parse yielded no channels for format:', format)
-        logger.error('[ChannelService] → Content preview:', processedConfig.substring(0, 300))
-        return []
+      if (format !== 'html') {
+        const result = parseLiveData(processedConfig)
+        const totalCh = result.reduce((s, g) => s + g.liveChannels.length, 0)
+        if (totalCh === 0) {
+          logger.error('[ChannelService] Direct parse yielded no channels for format:', format)
+          logger.error('[ChannelService] → Content preview:', processedConfig.substring(0, 300))
+          return []
+        }
+        logger.log('[ChannelService] Direct parse success:', result.length, 'groups,', totalCh, 'channels (format:', format, ')')
+        allGroups.push(...result)
+        lastGroupAddTime = Date.now()
+        await flushSnapshot()
+        return result
       }
-      logger.log('[ChannelService] Direct parse success:', result.length, 'groups,', totalCh, 'channels (format:', format, ')')
-      allGroups.push(...result)
-      lastGroupAddTime = Date.now()
-      await flushSnapshot()
-      return result
     }
 
     logger.log('[ChannelService] Found', configLives.length, 'source groups:',

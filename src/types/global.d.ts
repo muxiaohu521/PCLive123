@@ -58,6 +58,7 @@ declare global {
       setStoreValue: (key: string, value: any) => void
       deleteStoreValue: (key: string) => Promise<boolean>
       fetchUrl: (url: string, headers?: Record<string, string>) => Promise<string>
+      fetchUrlSpider: (url: string, headers?: Record<string, string>) => Promise<{ content: string; statusCode: number; headers: Record<string, string>; finalUrl: string }>
 
       probeStream: (url: string, headers?: Record<string, string>) => Promise<{ format: string; contentType: string; finalUrl: string; isPlaylist?: boolean; isFlv?: boolean }>
       createStreamSession: (url: string, headers?: Record<string, string>, detectedFormat?: string) => Promise<{ sessionId: string; proxyUrl: string; proxyPort: number; detectedFormat?: string; resolvedUrl?: string }>
@@ -115,6 +116,9 @@ declare global {
 
       serveLocalFile: (filePath: string) => Promise<{ success: boolean; token?: string; proxyUrl?: string; error?: string }>
       closeLocalFileServer: (token: string) => Promise<boolean>
+
+      readLocalChannels: () => Promise<any>
+      writeLocalChannels: (data: any) => Promise<boolean>
     }
   }
 

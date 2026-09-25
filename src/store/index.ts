@@ -29,6 +29,15 @@ interface SourceStatMap {
   [url: string]: SourceStat
 }
 
+interface LocalChannel {
+  name: string
+  urls: string[]
+}
+
+interface LocalChannelsData {
+  lives: LocalChannel[]
+}
+
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback
   try {
@@ -258,6 +267,9 @@ export const useAppStore = defineStore('app', () => {
   const pendingSniffUrl = ref<{ url: string; format: string; name: string } | null>(null)
   const showDlna = ref(false)
   const showSettings = ref(false)
+  const localChannelsData = ref<LocalChannelsData>({ lives: [] })
+  const showLocalChannelsList = ref(false)
+  const activeLocalLiveChannelIndex = ref(-1)
   const decodeMode = ref<DecodeMode>(loadDecodeMode())
   const ffmpegPath = ref<string>(loadFfmpegPath())
   const localVideoList = ref<LocalVideoItem[]>((() => {
@@ -268,7 +280,8 @@ export const useAppStore = defineStore('app', () => {
   const localPlayMode = ref<PlayMode>(loadLocalPlayMode())
   const currentLocalVideo = ref<LocalVideoItem | null>(null)
   const showLocalVideoList = ref(false)
-  const activePlayMode = ref<'local' | 'channel' | 'sniffer' | null>(null)
+  const activePlayMode = ref<'local' | 'channel' | 'sniffer' | 'locallive' | null>(null)
+  const localLiveChannelSourceIndex = ref(0)
 
   const currentGroup = computed(() => {
     if (channelGroups.value.length === 0) return null
@@ -280,6 +293,12 @@ export const useAppStore = defineStore('app', () => {
     if (activePlayMode.value === 'local' || activePlayMode.value === 'sniffer') {
       return externalPlayInfo.value?.url || ''
     }
+    if (activePlayMode.value === 'locallive') {
+      const info = localChannelCurrentInfo.value
+      if (!info) return ''
+      const idx = Math.min(localLiveChannelSourceIndex.value, info.urls.length - 1)
+      return info.urls[idx] || ''
+    }
     if (activePlayMode.value === 'channel' && currentChannel.value) {
       const ch = currentChannel.value
       return ch.channelUrls[ch.sourceIndex] || ''
@@ -288,7 +307,7 @@ export const useAppStore = defineStore('app', () => {
   })
 
   const currentHeaders = computed(() => {
-    if (activePlayMode.value === 'local' || activePlayMode.value === 'sniffer') {
+    if (activePlayMode.value === 'local' || activePlayMode.value === 'sniffer' || activePlayMode.value === 'locallive') {
       return externalPlayInfo.value?.headers || {}
     }
     if (activePlayMode.value === 'channel' && currentChannel.value) {
@@ -298,7 +317,7 @@ export const useAppStore = defineStore('app', () => {
   })
 
   const currentFormat = computed(() => {
-    if (activePlayMode.value === 'local' || activePlayMode.value === 'sniffer') {
+    if (activePlayMode.value === 'local' || activePlayMode.value === 'sniffer' || activePlayMode.value === 'locallive') {
       return externalPlayInfo.value?.format || ''
     }
     if (activePlayMode.value === 'channel' && currentChannel.value) {
@@ -341,6 +360,14 @@ export const useAppStore = defineStore('app', () => {
     return [...valid, ...invalid]
   })
 
+  const localChannelCurrentInfo = computed<LocalChannel | null>(() => {
+    const list = localChannelsData.value.lives
+    if (activeLocalLiveChannelIndex.value >= 0 && activeLocalLiveChannelIndex.value < list.length) {
+      return list[activeLocalLiveChannelIndex.value]
+    }
+    return null
+  })
+
   let _statsSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 function _doPersistSourceStats(): void {
@@ -367,12 +394,15 @@ function _doPersistSourceStats(): void {
     externalPlayInfo.value = { url, headers: headers || {}, format, title }
     currentChannel.value = null
     currentLocalVideo.value = null
+    activeLocalLiveChannelIndex.value = -1
     activePlayMode.value = 'sniffer'
   }
 
   function clearExternalPlay(): void {
     externalPlayInfo.value = null
-    if (activePlayMode.value === 'sniffer') {
+    activeLocalLiveChannelIndex.value = -1
+    localLiveChannelSourceIndex.value = 0
+    if (activePlayMode.value === 'sniffer' || activePlayMode.value === 'locallive') {
       activePlayMode.value = null
     }
   }
@@ -409,8 +439,13 @@ function _doPersistSourceStats(): void {
     } else {
       sourceList.value = []
     }
-    if (sourceList.value.length > 0 && !currentSource.value) {
-      setCurrentSource(sourceList.value[0].url)
+    if (sourceList.value.length > 0) {
+      const exists = sourceList.value.some((s) => s.url === currentSource.value)
+      if (!currentSource.value || !exists) {
+        setCurrentSource(sourceList.value[0].url)
+      }
+    } else {
+      if (currentSource.value) setCurrentSource('')
     }
   }
 
@@ -529,8 +564,8 @@ function _doPersistSourceStats(): void {
       sourceStats.value.delete(url)
       persistSourceStats()
     }
-    if (currentSource.value === url && sourceList.value.length > 0) {
-      setCurrentSource(sourceList.value[0].url)
+    if (currentSource.value === url) {
+      setCurrentSource(sourceList.value.length > 0 ? sourceList.value[0].url : '')
     }
     persistSourceList(sourceList.value)
   }
@@ -661,6 +696,7 @@ function _doPersistSourceStats(): void {
   function selectChannel(channel: LiveChannelItem): void {
     externalPlayInfo.value = null
     currentLocalVideo.value = null
+    activeLocalLiveChannelIndex.value = -1
     activePlayMode.value = 'channel'
     if (currentChannel.value && currentChannel.value !== channel) {
       saveChannelSourceIndex(currentChannel.value.channelName, currentChannel.value.sourceIndex)
@@ -742,6 +778,7 @@ function _doPersistSourceStats(): void {
   function selectLocalVideo(video: LocalVideoItem): void {
     currentLocalVideo.value = video
     currentChannel.value = null
+    activeLocalLiveChannelIndex.value = -1
     const url = filePathToUrl(video.filePath)
     externalPlayInfo.value = { url, headers: EMPTY_HEADERS, format: '', title: video.name }
     activePlayMode.value = 'local'
@@ -815,6 +852,263 @@ function _doPersistSourceStats(): void {
     selectLocalVideo(localVideoList.value[nextIdx])
   }
 
+  // ========== 本地直播源列表 ==========
+  async function loadLocalChannels(): Promise<void> {
+    logger.debug('loadLocalChannels: loading verified_channels.json')
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI?.readLocalChannels) {
+        const data = await window.electronAPI.readLocalChannels()
+        if (data && Array.isArray(data.lives)) {
+          logger.log(`loadLocalChannels: loaded ${data.lives.length} channels`)
+          localChannelsData.value = data as LocalChannelsData
+        } else {
+          logger.warn('loadLocalChannels: received invalid data structure', data)
+        }
+      } else {
+        logger.warn('loadLocalChannels: electronAPI not available')
+      }
+    } catch (e) {
+      logger.error('loadLocalChannels failed:', e)
+    }
+  }
+
+  async function saveLocalChannels(): Promise<boolean> {
+    logger.debug('saveLocalChannels: writing verified_channels.json')
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI?.writeLocalChannels) {
+        const ok = await window.electronAPI.writeLocalChannels(localChannelsData.value)
+        if (ok) {
+          logger.log(`saveLocalChannels: saved ${localChannelsData.value.lives.length} channels`)
+        } else {
+          logger.warn('saveLocalChannels: write operation returned false')
+        }
+        return ok
+      }
+      logger.warn('saveLocalChannels: electronAPI not available')
+      return false
+    } catch (e) {
+      logger.error('saveLocalChannels failed:', e)
+      return false
+    }
+  }
+
+  function selectLocalLiveChannel(index: number): void {
+    const list = localChannelsData.value.lives
+    const item = list[index]
+    if (!item) {
+      logger.warn(`selectLocalLiveChannel: index ${index} out of range (total: ${list.length})`)
+      return
+    }
+    const url = item.urls?.[0] || ''
+    if (!url) {
+      logger.warn(`selectLocalLiveChannel: index=${index} name="${item.name}" has no URL`)
+      return
+    }
+    logger.log(`selectLocalLiveChannel: index=${index} name="${item.name}" urls=${item.urls.length} url=${url.substring(0, 60)}`)
+    const format = url.toLowerCase().includes('.m3u8') ? 'm3u8' : ''
+    externalPlayInfo.value = { url, headers: {}, format, title: item.name }
+    currentChannel.value = null
+    currentLocalVideo.value = null
+    localLiveChannelSourceIndex.value = 0
+    activeLocalLiveChannelIndex.value = index
+    activePlayMode.value = 'locallive'
+  }
+
+  function playNextLocalLiveChannel(): void {
+    const list = localChannelsData.value.lives
+    if (list.length === 0) return
+    let idx = activeLocalLiveChannelIndex.value + 1
+    if (idx >= list.length) idx = 0
+    logger.debug(`playNextLocalLiveChannel: ${activeLocalLiveChannelIndex.value} → ${idx} (total: ${list.length})`)
+    selectLocalLiveChannel(idx)
+  }
+
+  function playPrevLocalLiveChannel(): void {
+    const list = localChannelsData.value.lives
+    if (list.length === 0) return
+    let idx = activeLocalLiveChannelIndex.value - 1
+    if (idx < 0) idx = list.length - 1
+    logger.debug(`playPrevLocalLiveChannel: ${activeLocalLiveChannelIndex.value} → ${idx} (total: ${list.length})`)
+    selectLocalLiveChannel(idx)
+  }
+
+  function clearLocalLiveChannel(): void {
+    logger.debug(`clearLocalLiveChannel: was index=${activeLocalLiveChannelIndex.value}`)
+    activeLocalLiveChannelIndex.value = -1
+    localLiveChannelSourceIndex.value = 0
+  }
+
+  function switchLocalLiveNextSource(): void {
+    const info = localChannelCurrentInfo.value
+    if (!info || info.urls.length <= 1) return
+    let idx = localLiveChannelSourceIndex.value + 1
+    if (idx >= info.urls.length) idx = 0
+    localLiveChannelSourceIndex.value = idx
+    logger.log(`switchLocalLiveNextSource: sourceIndex ${idx}/${info.urls.length}`)
+  }
+
+  function switchLocalLivePrevSource(): void {
+    const info = localChannelCurrentInfo.value
+    if (!info || info.urls.length <= 1) return
+    let idx = localLiveChannelSourceIndex.value - 1
+    if (idx < 0) idx = info.urls.length - 1
+    localLiveChannelSourceIndex.value = idx
+    logger.log(`switchLocalLivePrevSource: sourceIndex ${idx}/${info.urls.length}`)
+  }
+
+  // ==================== 快捷键 ====================
+  interface ShortcutDef {
+    key: string
+    ctrl: boolean
+    shift: boolean
+    alt: boolean
+    meta: boolean
+  }
+
+  interface ShortcutItem {
+    id: string
+    name: string
+    def: ShortcutDef
+  }
+
+  const DEFAULT_SHORTCUTS: Record<string, ShortcutDef> = {
+    channelList:     { key: 'c',        ctrl: false, shift: false, alt: false, meta: false },
+    localVideo:      { key: 'v',        ctrl: false, shift: false, alt: false, meta: false },
+    localChannels:   { key: 'k',        ctrl: false, shift: false, alt: false, meta: false },
+    livesPanel:      { key: 'l',        ctrl: false, shift: false, alt: false, meta: false },
+    sourceManager:   { key: 's',        ctrl: true,  shift: true,  alt: false, meta: false },
+    toolsDialog:     { key: 'x',        ctrl: true,  shift: true,  alt: false, meta: false },
+    dlna:            { key: 'd',        ctrl: true,  shift: true,  alt: false, meta: false },
+    settings:        { key: ',',        ctrl: true,  shift: false, alt: false, meta: false },
+    refreshSource:   { key: 'F5',       ctrl: false, shift: false, alt: false, meta: false },
+    fullscreen:      { key: 'F11',      ctrl: false, shift: false, alt: false, meta: false },
+    prevChannel:     { key: 'ArrowUp',  ctrl: false, shift: false, alt: false, meta: false },
+    nextChannel:     { key: 'ArrowDown',ctrl: false, shift: false, alt: false, meta: false },
+    escape:          { key: 'Escape',   ctrl: false, shift: false, alt: false, meta: false },
+  }
+
+  const SHORTCUT_NAMES: Record<string, string> = {
+    channelList:     '频道列表',
+    localVideo:      '本地视频列表',
+    localChannels:   '本地直播源',
+    livesPanel:      '直播节目',
+    sourceManager:   '直播源管理',
+    toolsDialog:     '工具箱',
+    dlna:            'DLNA投屏',
+    settings:        '设置',
+    refreshSource:   '刷新当前源',
+    fullscreen:      '全屏',
+    prevChannel:     '上一个频道',
+    nextChannel:     '下一个频道',
+    escape:          '关闭所有面板',
+  }
+
+  function loadShortcuts(): Record<string, ShortcutDef> {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.SHORTCUTS)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ShortcutDef>
+        const result: Record<string, ShortcutDef> = {}
+        for (const id of Object.keys(DEFAULT_SHORTCUTS)) {
+          if (parsed[id] && typeof parsed[id].key === 'string') {
+            result[id] = parsed[id]
+          } else {
+            result[id] = { ...DEFAULT_SHORTCUTS[id] }
+          }
+        }
+        return result
+      }
+    } catch {}
+    const result: Record<string, ShortcutDef> = {}
+    for (const id of Object.keys(DEFAULT_SHORTCUTS)) {
+      result[id] = { ...DEFAULT_SHORTCUTS[id] }
+    }
+    return result
+  }
+
+  const shortcuts = ref<Record<string, ShortcutDef>>(loadShortcuts())
+
+  function saveShortcuts(): void {
+    localStorage.setItem(STORAGE_KEYS.SHORTCUTS, JSON.stringify(shortcuts.value))
+  }
+
+  function matchShortcut(e: KeyboardEvent, id: string): boolean {
+    const s = shortcuts.value[id]
+    if (!s || !s.key) return false
+    const eventKey = e.key
+    const shortcutKey = s.key
+    let keysMatch: boolean
+    if (eventKey.length === 1 && shortcutKey.length === 1) {
+      keysMatch = eventKey.toLowerCase() === shortcutKey.toLowerCase()
+    } else {
+      keysMatch = eventKey === shortcutKey
+    }
+    return keysMatch
+      && e.ctrlKey === s.ctrl
+      && e.shiftKey === s.shift
+      && e.altKey === s.alt
+      && e.metaKey === s.meta
+  }
+
+  function matchAnyShortcut(e: KeyboardEvent): string | null {
+    for (const id of Object.keys(shortcuts.value)) {
+      if (matchShortcut(e, id)) return id
+    }
+    return null
+  }
+
+  function setShortcut(id: string, def: ShortcutDef): void {
+    shortcuts.value[id] = def
+    saveShortcuts()
+  }
+
+  function clearShortcut(id: string): void {
+    shortcuts.value[id] = { key: '', ctrl: false, shift: false, alt: false, meta: false }
+    saveShortcuts()
+  }
+
+  function resetShortcut(id: string): void {
+    if (DEFAULT_SHORTCUTS[id]) {
+      shortcuts.value[id] = { ...DEFAULT_SHORTCUTS[id] }
+      saveShortcuts()
+    }
+  }
+
+  function shortcutEventToDef(e: KeyboardEvent): ShortcutDef {
+    // 排除纯修饰键
+    const modKeys = ['Control', 'Shift', 'Alt', 'Meta']
+    const key = modKeys.includes(e.key) ? '' : e.key
+    return { key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }
+  }
+
+  function formatShortcutDisplay(def: ShortcutDef): string {
+    if (!def.key) return '未设置'
+    const parts: string[] = []
+    if (def.ctrl) parts.push('Ctrl')
+    if (def.shift) parts.push('Shift')
+    if (def.alt) parts.push('Alt')
+    if (def.meta) parts.push('Meta')
+    let keyDisplay = def.key
+    if (keyDisplay === ' ') keyDisplay = 'Space'
+    else if (keyDisplay === 'ArrowUp') keyDisplay = '↑'
+    else if (keyDisplay === 'ArrowDown') keyDisplay = '↓'
+    else if (keyDisplay.length === 1) keyDisplay = keyDisplay.toUpperCase()
+    parts.push(keyDisplay)
+    return parts.join('+')
+  }
+
+  function getShortcutList(): ShortcutItem[] {
+    const list: ShortcutItem[] = []
+    for (const id of Object.keys(DEFAULT_SHORTCUTS)) {
+      list.push({
+        id,
+        name: SHORTCUT_NAMES[id] || id,
+        def: shortcuts.value[id] || DEFAULT_SHORTCUTS[id],
+      })
+    }
+    return list
+  }
+
   return {
     sourceList,
     sortedSourceList,
@@ -880,6 +1174,29 @@ function _doPersistSourceStats(): void {
     playNextLocalVideo,
     playPreviousLocalVideo,
     autoPlayNextLocalVideo,
+    loadLocalChannels,
+    saveLocalChannels,
+    localChannelsData,
+    localChannelCurrentInfo,
+    showLocalChannelsList,
+    activeLocalLiveChannelIndex,
+    localLiveChannelSourceIndex,
+    selectLocalLiveChannel,
+    playNextLocalLiveChannel,
+    playPrevLocalLiveChannel,
+    clearLocalLiveChannel,
+    switchLocalLiveNextSource,
+    switchLocalLivePrevSource,
+    // 快捷键
+    shortcuts,
+    matchShortcut,
+    matchAnyShortcut,
+    setShortcut,
+    clearShortcut,
+    resetShortcut,
+    shortcutEventToDef,
+    formatShortcutDisplay,
+    getShortcutList,
   }
 })
 

@@ -19,6 +19,13 @@ interface SpiderReqResult {
   statusCode: number
 }
 
+interface SpiderFetchResult {
+  content: string
+  headers: Record<string, string>
+  statusCode: number
+  finalUrl: string
+}
+
 interface SpiderInstance {
   init?(ext: string): void
   live?(url: string): string | Promise<string>
@@ -30,9 +37,14 @@ const spiderCache = new Map<string, SpiderInstance>()
 const spiderLock = new Map<string, Promise<SpiderInstance | null>>()
 
 let fetchUrlFunc: ((url: string, headers: Record<string, string>) => Promise<string>) | null = null
+let fetchUrlFullFunc: ((url: string, headers: Record<string, string>) => Promise<SpiderFetchResult>) | null = null
 
 export function setFetchUrlFunc(fn: (url: string, headers: Record<string, string>) => Promise<string>): void {
   fetchUrlFunc = fn
+}
+
+export function setFetchUrlFullFunc(fn: (url: string, headers: Record<string, string>) => Promise<SpiderFetchResult>): void {
+  fetchUrlFullFunc = fn
 }
 
 async function httpRequest(url: string, options: SpiderReqOptions): Promise<SpiderReqResult> {
@@ -67,7 +79,12 @@ async function httpRequest(url: string, options: SpiderReqOptions): Promise<Spid
   }
 
   try {
-    let content: string
+    // Use the full-response fetch function if available (new behavior with proper redirect handling)
+    if (fetchUrlFullFunc) {
+      return httpRequestFull(url, method, headers, postBody, redirect, maxRedirects)
+    }
+
+    // Fallback: use the old string-only fetch function
     if (!fetchUrlFunc) {
       return { content: '', headers: {}, statusCode: 500 }
     }
@@ -76,32 +93,21 @@ async function httpRequest(url: string, options: SpiderReqOptions): Promise<Spid
     let redirectCount = 0
 
     while (redirectCount <= maxRedirects) {
-      let resultHeaders: Record<string, string> = {}
-
-      if (redirect > 0 && redirectCount > 0) {
-        headers['X-Spider-Redirect'] = String(redirectCount)
-      }
-
       if (method === 'POST' && postBody) {
-        content = await fetchUrlFunc(currentUrl, { ...headers, 'X-Spider-Method': 'POST', 'X-Spider-Body': postBody })
+        const content = await fetchUrlFunc(currentUrl, { ...headers })
+        return { content: content || '', headers: {}, statusCode: content ? 200 : 404 }
       } else {
-        content = await fetchUrlFunc(currentUrl, { ...headers, 'X-Spider-Follow-Redirect': String(redirect) })
-      }
-
-      if (redirect > 0 && redirectCount < maxRedirects) {
-        const redirectMatch = content.match(/^(https?:\/\/[^\s]+)$/i)
-        if (redirectMatch && /^https?:\/\//i.test(redirectMatch[1]) && redirectMatch[1] !== currentUrl) {
-          currentUrl = redirectMatch[1]
-          redirectCount++
-          logger.log('[SpiderService] Following redirect', redirectCount, 'to:', currentUrl.substring(0, 80))
-          continue
+        const content = await fetchUrlFunc(currentUrl, { ...headers })
+        if (redirect > 0 && redirectCount < maxRedirects) {
+          const redirectMatch = content.match(/^(https?:\/\/[^\s]+)$/i)
+          if (redirectMatch && /^https?:\/\//i.test(redirectMatch[1]) && redirectMatch[1] !== currentUrl) {
+            currentUrl = redirectMatch[1]
+            redirectCount++
+            logger.log('[SpiderService][fallback] Following redirect', redirectCount, 'to:', currentUrl.substring(0, 80))
+            continue
+          }
         }
-      }
-
-      return {
-        content: content || '',
-        headers: resultHeaders,
-        statusCode: content ? 200 : 404,
+        return { content: content || '', headers: {}, statusCode: content ? 200 : 404 }
       }
     }
 
@@ -112,6 +118,66 @@ async function httpRequest(url: string, options: SpiderReqOptions): Promise<Spid
       headers: {},
       statusCode: e?.code || 500,
     }
+  }
+}
+
+async function httpRequestFull(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  postBody: string,
+  redirect: number,
+  maxRedirects: number,
+): Promise<SpiderReqResult> {
+  let currentUrl = url
+  let redirectCount = 0
+
+  while (redirectCount <= maxRedirects) {
+    const reqHeaders = { ...headers }
+
+    // Signal the main process: if redirect > 0, we want to handle redirects manually
+    if (redirect > 0) {
+      reqHeaders['X-Spider-No-Redirect'] = '1'
+    }
+
+    if (method === 'POST' && postBody) {
+      reqHeaders['X-Spider-Method'] = 'POST'
+      reqHeaders['X-Spider-Body'] = postBody
+    }
+
+    const result = await fetchUrlFullFunc!(currentUrl, reqHeaders)
+
+    // If spider wants manual redirect handling and we got a redirect
+    if (redirect > 0 && result.statusCode >= 300 && result.statusCode < 400 && result.headers['location']) {
+      const locationUrl = resolveUrl(currentUrl, result.headers['location'])
+      if (locationUrl && locationUrl !== currentUrl) {
+        logger.log('[SpiderService] Got redirect', result.statusCode, 'to:', locationUrl.substring(0, 80))
+        currentUrl = locationUrl
+        redirectCount++
+        // Copied Set-Cookie from redirect response so subsequent requests have auth cookies
+        continue
+      }
+    }
+
+    // Return the final response (whether it was a redirect followed by main or not)
+    return {
+      content: result.content || '',
+      headers: result.headers || {},
+      statusCode: result.statusCode || 200,
+    }
+  }
+
+  // Too many redirects
+  return { content: '', headers: {}, statusCode: 310 }
+}
+
+function resolveUrl(base: string, location: string): string {
+  if (!location) return ''
+  if (/^https?:\/\//i.test(location)) return location
+  try {
+    return new URL(location, base).href
+  } catch {
+    return ''
   }
 }
 

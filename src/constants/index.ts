@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
   FFMPEG_PATH: 'pclive_ffmpeg_path',
   LOCAL_VIDEOS: 'pclive_local_videos',
   LOCAL_PLAY_MODE: 'pclive_local_play_mode',
+  SHORTCUTS: 'pclive_shortcuts',
 } as const
 
 export const SUPPORTED_VIDEO_EXTENSIONS = [

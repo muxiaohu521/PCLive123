@@ -28,6 +28,13 @@
           {{ localVideoCountText }}
         </span>
       </template>
+      <template v-else-if="store.activePlayMode === 'sniffer' && store.activeLocalLiveChannelIndex >= 0">
+        <span class="mode-label">本地直播源</span>
+        <span class="separator">|</span>
+        <span class="channel-label marquee-wrap" :class="{ active: isLongText(snifferTitle) }">
+          <span class="marquee-inner">{{ isLongText(snifferTitle) ? marqueeContent(snifferTitle) : snifferTitle }}</span>
+        </span>
+      </template>
       <template v-else-if="store.activePlayMode === 'sniffer'">
         <span class="mode-label">URL 嗅探</span>
         <span class="separator">|</span>
@@ -41,7 +48,7 @@
       <span class="separator">|</span>
       <el-button
         link
-        title="工具箱 (Ctrl+N)"
+        title="工具箱 (Ctrl+Shift+X)"
         @click="store.showToolsDialog = !store.showToolsDialog"
         class="title-btn"
         :class="{ active: store.showToolsDialog }"
@@ -69,8 +76,16 @@
       />
       <el-button
         link
+        :icon="Monitor"
+        title="本地直播源 (K)"
+        @click="toggleLocalChannelsList"
+        class="title-btn"
+        :class="{ active: store.showLocalChannelsList }"
+      />
+      <el-button
+        link
         :icon="Switch"
-        title="直播源管理 (Ctrl+S)"
+        title="直播源管理 (Ctrl+Shift+S)"
         @click="toggleSourceManager"
         class="title-btn"
         :class="{ active: store.showSourceManager }"
@@ -78,7 +93,7 @@
       <el-button
         link
         :icon="List"
-        title="频道列表 (Tab)"
+        title="频道列表 (C)"
         @click="toggleChannelList"
         class="title-btn"
       />
@@ -101,7 +116,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAppStore } from '@/store'
-import { Switch, List, Refresh, VideoCamera } from '@element-plus/icons-vue'
+import { Switch, List, Refresh, VideoCamera, Monitor } from '@element-plus/icons-vue'
 
 const store = useAppStore()
 
@@ -148,6 +163,17 @@ function toggleLocalVideoList() {
     store.showChannelList = false
     store.showSourceManager = false
     store.showLivesPanel = false
+    store.showLocalChannelsList = false
+  }
+}
+
+function toggleLocalChannelsList() {
+  store.showLocalChannelsList = !store.showLocalChannelsList
+  if (store.showLocalChannelsList) {
+    store.showChannelList = false
+    store.showSourceManager = false
+    store.showLivesPanel = false
+    store.showLocalVideoList = false
   }
 }
 
@@ -157,6 +183,7 @@ function toggleSourceManager() {
     store.showChannelList = false
     store.showLivesPanel = false
     store.showLocalVideoList = false
+    store.showLocalChannelsList = false
   }
 }
 
@@ -166,6 +193,7 @@ function toggleChannelList() {
     store.showSourceManager = false
     store.showLivesPanel = false
     store.showLocalVideoList = false
+    store.showLocalChannelsList = false
   }
 }
 

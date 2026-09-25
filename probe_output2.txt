@@ -1,0 +1,75 @@
+=== 1. 鍒嗘瀽 CCTV H5 OpenAPI SDK ===
+SDK Status: 200 Length: 14040
+SDK 涓殑 API URLs: [ 'https://s.yangshipin.cn', 'https://mtest.yangshipin.cn/s' ]
+
+=== 2. 灏濊瘯 JSON API ===
+  https://www.yangshipin.cn/api/v1/live/list: HTTP 200, Length 9249
+  https://www.yangshipin.cn/api/v1/tv/channel_list: HTTP 200, Length 9249
+  https://www.yangshipin.cn/api/v1/channel/list: HTTP 200, Length 9249
+
+=== 3. 绉诲姩绔?API ===
+  https://m.yangshipin.cn/api/v1/live/list: HTTP 302, Length 0
+  https://m.yangshipin.cn/api/v1/tv/channel_list: HTTP 302, Length 0
+  https://m.yangshipin.cn/static/api/v1/live/list: HTTP 302, Length 0
+
+=== 4. CNTV 搴曞眰 API ===
+  https://api.cntv.cn/NewLive/getLiveStream?pid=CCTV1: HTTP 404, Length 41
+    Body: {"errcode":"1200","msg":"path not found"}
+  https://api.cntv.cn/video/videoinfoByGuid?serviceId=tvcctv&guid=CCTV1: HTTP 200, Length 39
+    Body: {"errcode":"1001","msg":"params error"}
+  https://vdn.apps.cntv.cn/api/getLiveSource?pid=CCTV1: HTTP 404, Length 494
+    Body: <!DOCTYPE html>
+<html>
+<head>
+<title>Error</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>An error occurred.</h1>
+<p>Sorry, the page you are looking for is currently unavailable.<br/>
+Please try again later.</p>
+<p>If you are the system administrator of this resource then you should check
+the error log for details.</p>
+<p><em>Faithfully yours, nginx.</em></p>
+</body>
+</html>
+
+  https://vdnad.apps.cntv.cn/api/getHttpStream?pid=CCTV1: HTTP 404, Length 494
+    Body: <!DOCTYPE html>
+<html>
+<head>
+<title>Error</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>An error occurred.</h1>
+<p>Sorry, the page you are looking for is currently unavailable.<br/>
+Please try again later.</p>
+<p>If you are the system administrator of this resource then you should check
+the error log for details.</p>
+<p><em>Faithfully yours, nginx.</em></p>
+</body>
+</html>
+
+  https://y.shpin.com.cn/api/live/list: ERROR - getaddrinfo ENOTFOUND y.shpin.com.cn
+  https://api.yangshipin.cn/api/v1/live/list: ERROR - getaddrinfo ENOTFOUND api.yangshipin.cn
+
+=== 5. 鎾斁鍣?JS ===
+Player JS Status: 200 Length: 19857
+
+=== 6. 鏂扮増API灏濊瘯 ===
+  https://www.yangshipin.cn/api/v1/page?url=/tv/home: HTTP 200, Length 9249
+  https://www.yangshipin.cn/api/ssr/tv/home: HTTP 200, Length 9249
+  https://www.yangshipin.cn/_api/tv/home: HTTP 200, Length 9249
