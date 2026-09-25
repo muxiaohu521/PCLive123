@@ -77,3 +77,6 @@ desktop.ini
 # ============================================================
 sync_github.ps1
 _pushlog.txt
+
+# 自动下载的工具 (Node.js 等)
+/tools/

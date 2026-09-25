@@ -33,12 +33,105 @@ Write-Host ""
 
 Write-Host "[STEP 0] Checking environment..." -ForegroundColor Yellow
 
-# 检查 Node.js
+# ============================================================
+# 自动检测 / 下载 Node.js
+# ============================================================
+function Install-NodeJs {
+    $nodeToolsDir = Join-Path $scriptDir "tools\node"
+    if (-not (Test-Path $nodeToolsDir)) {
+        New-Item -ItemType Directory -Force -Path $nodeToolsDir | Out-Null
+    }
+
+    # 获取最新 LTS 下载地址
+    $nodeUrl = "https://nodejs.org/dist/v20.18.1/node-v20.18.1-win-x64.zip"
+    try {
+        $index = Invoke-RestMethod "https://nodejs.org/download/release/index.json" -TimeoutSec 15
+        $lts = $index | Where-Object { $_.lts -ne $false -and $_.files -contains "win-x64-zip" } | Select-Object -First 1
+        if ($lts) { $nodeUrl = "https://nodejs.org/dist/$($lts.version)/node-$($lts.version)-win-x64.zip" }
+    } catch {}
+
+    $zipFile = Join-Path $nodeToolsDir "node.zip"
+
+    Write-Host "  正在下载 Node.js (约 30MB)..." -ForegroundColor Cyan
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $nodeUrl -OutFile $zipFile -TimeoutSec 300 -ErrorAction Stop
+    } catch {
+        Write-Host "  [ERROR] Node.js 下载失败: $_" -ForegroundColor Red
+        return $false
+    }
+
+    Write-Host "  正在解压..." -ForegroundColor Cyan
+    try {
+        Get-ChildItem -Path $nodeToolsDir -Exclude "*.zip" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Expand-Archive -Path $zipFile -DestinationPath $nodeToolsDir -Force
+        Remove-Item -Path $zipFile -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "  [ERROR] 解压失败: $_" -ForegroundColor Red
+        return $false
+    }
+
+    # 找到解压后的 node.exe
+    $extracted = Get-ChildItem -Path $nodeToolsDir -Directory | Where-Object { Test-Path "$($_.FullName)\node.exe" } | Select-Object -First 1
+    if ($extracted) { $script:nodeBinDir = $extracted.FullName; return $true }
+    if (Test-Path "$nodeToolsDir\node.exe") { $script:nodeBinDir = $nodeToolsDir; return $true }
+
+    Write-Host "  [ERROR] 未找到解压后的 node.exe" -ForegroundColor Red
+    return $false
+}
+
+function Get-NodeBin {
+    $nodeBin = $null
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) { $nodeBin = Split-Path $nodeCmd.Source -Parent }
+    if (-not $nodeBin) {
+        $localNode = Join-Path $scriptDir "tools\node"
+        if (Test-Path "$localNode\node.exe") { $nodeBin = $localNode }
+        else {
+            $found = Get-ChildItem -Path $localNode -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path "$($_.FullName)\node.exe" } | Select-Object -First 1
+            if ($found) { $nodeBin = $found.FullName }
+        }
+    }
+    return $nodeBin
+}
+
+$nodeBinDir = Get-NodeBin
+if (-not $nodeBinDir) {
+    Write-Host "  Node.js 未检测到，正在自动下载..." -ForegroundColor Yellow
+    if (Install-NodeJs) {
+        $nodeBinDir = Get-NodeBin
+        Write-Host "  Node.js 安装完成: $nodeBinDir" -ForegroundColor Green
+    } else {
+        Write-Host ""
+        Write-Host "  ========================================" -ForegroundColor Red
+        Write-Host "    [ERROR] Node.js 下载失败！" -ForegroundColor Red
+        Write-Host "  ========================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "    请手动安装 Node.js (推荐 LTS 版本):" -ForegroundColor Yellow
+        Write-Host "      下载地址: https://nodejs.org/" -ForegroundColor Gray
+        Write-Host "      安装命令: winget install OpenJS.NodeJS.LTS" -ForegroundColor Gray
+        Write-Host ""
+        exit 1
+    }
+}
+
+$env:Path = "$nodeBinDir;$env:Path"
 $nodeVer = node --version 2>$null
 Write-Host "  Node.js: $nodeVer" -ForegroundColor Green
 
 # 检查 npm
 $npmVer = npm --version 2>$null
+if (-not $npmVer) {
+    Write-Host ""
+    Write-Host "  ========================================" -ForegroundColor Red
+    Write-Host "    [ERROR] npm 未找到！" -ForegroundColor Red
+    Write-Host "  ========================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "    npm 通常随 Node.js 一起安装。" -ForegroundColor Yellow
+    Write-Host "    请重新安装 Node.js: https://nodejs.org/" -ForegroundColor Gray
+    Write-Host ""
+    exit 1
+}
 Write-Host "  npm:     v$npmVer" -ForegroundColor Green
 
 # 检查 Electron dist

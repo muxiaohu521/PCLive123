@@ -802,6 +802,93 @@ function probeContentTypeCoreGet(url, headers, redirectsLeft, resolve) {
   req.setTimeout(8000, () => { req.destroy(); resolve({ contentType: '', isPlaylist: false, isFlv: false, finalUrl: parsed.href }) })
 }
 
+function isDirectFormatUrl(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase()
+    return /\.(m3u8|m3u|flv|f4v|mp4|m4v|mov|mkv|webm|ts|m2ts|mts|mpd|ism|smil|aac|mp3|ogg|ogv|wav|avi|wmv|rm|rmvb)(\?|&|$)/i.test(pathname)
+  } catch (_) {
+    return false
+  }
+}
+
+function doProxyFetchNode(url, sessionHeaders, redirectsLeft, resolve, reject, depth) {
+  if (redirectsLeft <= 0) return reject(new Error('Too many redirects'))
+  if (!/^https?:\/\//i.test(url)) return reject(new Error('Invalid URL: ' + url))
+
+  let parsed
+  try { parsed = new URL(url) } catch (_) { return reject(new Error('Malformed URL: ' + url)) }
+
+  const sendHeaders = buildReqHeaders(parsed, sessionHeaders)
+
+  const protocol = parsed.protocol === 'https:' ? https : http
+  const options = {
+    hostname: parsed.hostname,
+    port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+    path: parsed.pathname + parsed.search,
+    method: 'GET',
+    headers: sendHeaders,
+    timeout: 15000,
+    rejectUnauthorized: false,
+    family: getIpFamily(parsed),
+  }
+
+  const req = protocol.request(options, (res) => {
+    const status = res.statusCode || 200
+    const ct = (res.headers['content-type'] || res.headers['Content-Type'] || '').toLowerCase()
+    const loc = (res.headers['location'] || res.headers['Location'] || '')
+
+    const setCookieData = extractSetCookieHeaders(res.headers)
+    if (setCookieData) {
+      try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
+    }
+
+    if (status >= 300 && status < 400 && loc) {
+      res.resume()
+      const nextUrl = resolveUrl(parsed.href, loc)
+      doProxyFetchNode(nextUrl, sessionHeaders, redirectsLeft - 1, resolve, reject, depth + 1)
+      return
+    }
+
+    const chunks = []
+    res.on('data', c => chunks.push(c))
+    res.on('end', () => {
+      const buf = Buffer.concat(chunks)
+      const ce = res.headers['content-encoding'] || ''
+      let bodyBuf = buf
+      try {
+        if (ce.includes('gzip')) bodyBuf = zlib.gunzipSync(buf)
+        else if (ce.includes('deflate')) bodyBuf = zlib.inflateSync(buf)
+      } catch (_) {}
+
+      const bodyStr = bodyBuf.toString('utf8')
+      const isPlaylist = bodyStr.startsWith('#EXTM3U') || bodyStr.includes('\n#EXTM3U')
+      const finalCt = isPlaylist ? 'application/vnd.apple.mpegurl' : ct
+
+      resolve({
+        status,
+        contentType: finalCt,
+        body: bodyBuf,
+        isPlaylist,
+        finalUrl: url,
+      })
+    })
+    res.on('error', e => {
+      debugLog(`PROXY-FETCH-NODE RES ERROR depth=${depth}: ${e.message}`)
+      reject(e)
+    })
+  })
+
+  req.on('error', e => {
+    debugLog(`PROXY-FETCH-NODE REQ ERROR depth=${depth}: ${e.message}`)
+    reject(e)
+  })
+  req.on('timeout', () => {
+    req.destroy()
+    reject(new Error('timeout'))
+  })
+  req.end()
+}
+
 function proxyFetch(sessionBaseUrl, sessionHeaders, reqPath, maxRedirects = 20) {
   let targetUrl
   if (reqPath.startsWith('seg/')) {
@@ -828,11 +915,19 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
 
   const sendHeaders = buildReqHeaders(parsed, sessionHeaders)
 
-  // Use Electron's net.request (Chromium network stack) instead of Node.js http/https.
-  // This gives us browser-grade TLS fingerprint, HTTP/2 support, and proper CDN compatibility.
+  // Direct format URLs (with clear media extensions) use Node.js http/https
+  // for reliable streaming with old CDNs. Others use net.request for browser simulation.
+  if (isDirectFormatUrl(url)) {
+    doProxyFetchNode(url, sessionHeaders, redirectsLeft, resolve, reject, depth)
+    return
+  }
+
+  // Use Electron's net.request (Chromium network stack) with manual redirect handling.
+  // redirect:'manual' lets us capture Set-Cookie from every redirect response.
   const req = net.request({
     method: 'GET',
     url: url,
+    redirect: 'manual',
   })
 
   // Apply headers through Electron's net API
@@ -852,7 +947,7 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
     const ct = (res.headers['content-type'] || res.headers['Content-Type'] || '').toLowerCase()
     const loc = (res.headers['location'] || res.headers['Location'] || '')
 
-    // Parse Set-Cookie from response headers
+    // Parse Set-Cookie from response headers (now works for every redirect step)
     const setCookieData = extractSetCookieHeaders(res.headers)
     if (setCookieData) {
       try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
@@ -1014,6 +1109,96 @@ function ensureLocalFileServer() {
   })
 }
 
+function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft) {
+  if (redirectsLeft <= 0) {
+    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('too many redirects') }
+    return
+  }
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
+    return
+  }
+
+  let parsed
+  try { parsed = new URL(targetUrl) } catch (_) {
+    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
+    return
+  }
+
+  const sendHeaders = buildReqHeaders(parsed, sessionHeaders)
+
+  const protocol = parsed.protocol === 'https:' ? https : http
+  const options = {
+    hostname: parsed.hostname,
+    port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+    path: parsed.pathname + parsed.search,
+    method: 'GET',
+    headers: sendHeaders,
+    timeout: 30000,
+    rejectUnauthorized: false,
+    family: getIpFamily(parsed),
+  }
+
+  const req = protocol.request(options, (res) => {
+    const status = res.statusCode || 200
+    const loc = (res.headers['location'] || res.headers['Location'] || '')
+
+    const setCookieData = extractSetCookieHeaders(res.headers)
+    if (setCookieData) {
+      try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
+    }
+
+    if (status >= 300 && status < 400 && loc) {
+      res.resume()
+      const nextUrl = resolveUrl(parsed.href, loc)
+      return pipeLiveStreamNode(clientReq, clientRes, nextUrl, sessionHeaders, redirectsLeft - 1)
+    }
+
+    const ct = (res.headers['content-type'] || res.headers['Content-Type'] || 'video/mp2t').toLowerCase()
+
+    if (status >= 400 || /^(text\/html|text\/plain|application\/json|application\/xml)/.test(ct)) {
+      res.resume()
+      if (status === 403 && redirectsLeft > 1) {
+        const currentReferer = sendHeaders['Referer'] || ''
+        const targetOrigin = `${parsed.protocol}//${parsed.host}`
+        if (currentReferer && !currentReferer.startsWith(targetOrigin)) {
+          debugLog(`[STREAM-PIPE-NODE] 403 with cross-origin Referer, retry with target origin Referer`)
+          const retryHeaders = { ...sessionHeaders, 'Referer': `${targetOrigin}/`, 'Origin': targetOrigin }
+          return pipeLiveStreamNode(clientReq, clientRes, targetUrl, retryHeaders, redirectsLeft - 1)
+        }
+      }
+      if (!clientRes.headersSent) {
+        clientRes.writeHead(status >= 400 ? status : 415, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*' })
+        clientRes.end()
+      }
+      return
+    }
+
+    const respHeaders = {
+      'Content-Type': ct,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    }
+    if (res.headers['content-length']) respHeaders['Content-Length'] = res.headers['content-length']
+    clientRes.writeHead(status, respHeaders)
+
+    res.pipe(clientRes)
+    res.on('error', () => { try { clientRes.end() } catch (_) {} })
+    clientReq.on('close', () => { try { res.destroy() } catch (_) {} })
+  })
+
+  req.on('error', (e) => {
+    debugLog(`STREAM-PIPE-NODE error: ${e.message} url=${targetUrl.substring(0, 80)}`)
+    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end(e.message) }
+  })
+  req.on('timeout', () => {
+    req.destroy()
+    if (!clientRes.headersSent) { clientRes.writeHead(504, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('timeout') }
+  })
+  req.end()
+}
+
 function pipeLiveStream(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft = 8) {
   if (redirectsLeft <= 0) {
     if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('too many redirects') }
@@ -1032,10 +1217,19 @@ function pipeLiveStream(clientReq, clientRes, targetUrl, sessionHeaders, redirec
 
   const sendHeaders = buildReqHeaders(parsed, sessionHeaders)
 
-  // Use Electron's net.request (Chromium network stack) — browser-grade TLS, HTTP/2, CDN compatible
+  // Direct format URLs (with clear media extensions) use Node.js http/https
+  // for reliable streaming with old CDNs. Others use net.request for browser simulation.
+  if (isDirectFormatUrl(targetUrl)) {
+    pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft)
+    return
+  }
+
+  // Use Electron's net.request (Chromium network stack) with manual redirect handling.
+  // redirect:'manual' lets us capture Set-Cookie from every redirect response.
   const req = net.request({
     method: 'GET',
     url: targetUrl,
+    redirect: 'manual',
   })
 
   if (sendHeaders) {
@@ -1049,13 +1243,12 @@ function pipeLiveStream(clientReq, clientRes, targetUrl, sessionHeaders, redirec
     const status = res.statusCode || 200
     const loc = (res.headers['location'] || res.headers['Location'] || '')
 
-    // Parse Set-Cookie from response headers
+    // Parse Set-Cookie from response headers (now works for every redirect step)
     const setCookieData = extractSetCookieHeaders(res.headers)
     if (setCookieData) {
       try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
     }
 
-    // net.request follows redirects by default, but handle manually for header changes
     if ([301, 302, 303, 307, 308].includes(status) && loc) {
       res.destroy()
       const nextUrl = resolveUrl(parsed.href, loc)
