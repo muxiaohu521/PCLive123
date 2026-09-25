@@ -112,11 +112,9 @@
               {{ host }}
               <button
                 class="host-remove"
-                @click="extraAdHosts.includes(host) ? removeCustomHost(host) : removeBuiltinDomain(host)"
+                @click.stop="extraAdHosts.includes(host) ? removeCustomHost(host) : removeBuiltinDomain(host)"
                 :title="extraAdHosts.includes(host) ? '移除自定义' : '移除内置'"
-              >
-                &#x2715;
-              </button>
+              >✕</button>
             </span>
           </div>
           <div v-if="removedBuiltinHosts.length > 0" class="removed-section">
@@ -160,11 +158,9 @@
               {{ kw }}
               <button
                 class="host-remove"
-                @click="extraAdKeywords.includes(kw) ? removeCustomKeyword(kw) : removeBuiltinKw(kw)"
+                @click.stop="extraAdKeywords.includes(kw) ? removeCustomKeyword(kw) : removeBuiltinKw(kw)"
                 :title="extraAdKeywords.includes(kw) ? '移除自定义' : '移除内置'"
-              >
-                &#x2715;
-              </button>
+              >✕</button>
             </span>
           </div>
           <div v-if="removedBuiltinKeywords.length > 0" class="removed-section">
@@ -608,11 +604,11 @@ function restoreBuiltinKw(kw: string) {
 .host-tag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
+  gap: 4px;
+  padding: 3px 7px;
   background: #2a2a3e;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 11px;
   color: #aaa;
   font-family: monospace;
 }
@@ -624,16 +620,28 @@ function restoreBuiltinKw(kw: string) {
 }
 
 .host-remove {
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: rgba(244,67,54,0.15);
+  border: 1px solid rgba(244,67,54,0.3);
+  border-radius: 50%;
   color: #f44336;
   cursor: pointer;
-  font-size: 9px;
-  padding: 0 1px;
+  font-size: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
   line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
 }
 
-.host-remove:hover { color: #ff6b6b; }
+.host-remove:hover {
+  background: #f44336;
+  color: #fff;
+}
 
 .host-tag.is-removed {
   background: #2a1a1a;

@@ -816,25 +816,18 @@ async function toLocalHttpUrl(fileUrl: string): Promise<string | null> {
   return null
 }
 
-function playLocalNative(url: string): void {
+async function playLocalNative(url: string): Promise<void> {
   if (!art) return
   const video = art.video as HTMLVideoElement
   disposeHls(video)
   disposeFlv(video)
   disposeAudioPlayer()
-  sessionManager.destroy()
-  networkInterceptor.destroy()
-  cleanupFfmpegPatches()
+  await closeCurrentSession()
   currentFormat = 'mp4'
 
-  if (art.option.url === url) {
-    video.currentTime = 0
-    video.play().catch(() => {})
-  } else {
-    video.removeAttribute('src')
-    art.type = 'mp4'
-    art.switchUrl(url)
-  }
+  video.removeAttribute('src')
+  art.type = 'mp4'
+  art.switchUrl(url)
   if (getIsMirroring()) restartMirrorStream(art)
 }
 
@@ -1019,10 +1012,10 @@ async function playLocalFile(url: string): Promise<void> {
     case 'hardware': {
       if (isAudio) {
         logger.info(`[VideoPlayer] hardware: .${ext} → 硬解 (native audio)`)
-        playLocalNative(url)
+        await playLocalNative(url)
       } else if (isNativeVideo) {
         logger.info(`[VideoPlayer] hardware: .${ext} → 硬解 (native)`)
-        playLocalNative(url)
+        await playLocalNative(url)
       } else {
         logger.warn(`[VideoPlayer] hardware: .${ext} not supported by native playback, hardware mode forbids software/FFmpeg fallback`)
       }
@@ -1069,7 +1062,7 @@ async function playLocalFile(url: string): Promise<void> {
         }
       } else if (isNativeVideo) {
         logger.info(`[VideoPlayer] auto: .${ext} → 硬解 (native)`)
-        playLocalNative(url)
+        await playLocalNative(url)
         if (gen !== _playLocalFileGen) return
         await new Promise(r => setTimeout(r, 3000))
         if (gen !== _playLocalFileGen) return
@@ -1557,6 +1550,7 @@ async function createPlayer(): Promise<void> {
     }
 
     clearSourceTimeout()
+    stopCurrentPlayback()
     emit('error')
   })
 
@@ -1603,15 +1597,22 @@ function stopCurrentPlayback(): void {
       video.removeAttribute('src')
       video.load()
     } catch (_) {}
+    try { video.currentTime = 0 } catch (_) {}
+    try {
+      const v = video as any
+      if (v.srcObject) { v.srcObject = null }
+    } catch (_) {}
   }
   disposeAudioPlayer()
 }
 
-function loadUrl(url: string, headers: Record<string, string>): void {
+async function loadUrl(url: string, headers: Record<string, string>): Promise<void> {
   if (!art || !url) return
   clearLoadTimer()
   clearSourceTimeout()
   clearStallWatchdog()
+  if (_errorRetryTimer) { clearTimeout(_errorRetryTimer); _errorRetryTimer = null }
+  if (_mpegtsWatchdog) { clearTimeout(_mpegtsWatchdog); _mpegtsWatchdog = null }
   const modeChanged = lastPlayMode !== null && lastPlayMode !== store.activePlayMode
   const decodeChanged = lastDecodeMode !== null && lastDecodeMode !== store.decodeMode
   const isNewUrl = url !== lastLoadUrl
@@ -1622,11 +1623,10 @@ function loadUrl(url: string, headers: Record<string, string>): void {
     confirmedFormat = null
     hasEverPlayed = false
     cleanupLocalEndedDetector()
-    stopCurrentPlayback()
-    sessionManager.destroy()
-    networkInterceptor.destroy()
     cleanupFfmpegPatches()
   }
+  stopCurrentPlayback()
+  await closeCurrentSession()
   lastPlayMode = store.activePlayMode
   lastDecodeMode = store.decodeMode
   lastLoadUrl = url
@@ -1910,6 +1910,8 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     disposeAudioPlayer()
     currentFormat = finalFormat
 
+    if (genId !== loadGenerationId) return
+
     if (isUnknownFormat) {
       logger.warn(`[VideoPlayer] hardware: .${finalFormat} 格式无法识别, hardware 模式禁止 software/FFmpeg 回退`)
     } else if (finalFormat === 'm3u8' || finalFormat === 'flv' || finalFormat === 'ts') {
@@ -1933,6 +1935,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     disposeHls(video)
     disposeFlv(video)
     disposeAudioPlayer()
+    if (genId !== loadGenerationId) return
     if (isUnknownFormat) {
       logger.warn(`[VideoPlayer] software: .${finalFormat} 格式无法识别, software 模式禁止 native/FFmpeg 回退`)
     } else if (finalFormat === 'm3u8' || finalFormat === 'ts') {
@@ -2010,6 +2013,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     logger.info(`[VideoPlayer] auto: .${onlineExt} → 软解 (AudioPlayer)`)
     currentFormat = finalFormat
     disposeAudioPlayer()
+    if (genId !== loadGenerationId) return
     const player = new SoftwareAudioPlayer()
     audioPlayer = player
     const autoAudioGenId = loadGenerationId
@@ -2071,6 +2075,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     disposeHls(video)
     disposeFlv(video)
     disposeAudioPlayer()
+    if (genId !== loadGenerationId) return
     video.src = finalUrl
 
     const autoNativeGenId = loadGenerationId
@@ -2110,6 +2115,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     disposeHls(video)
     disposeFlv(video)
     disposeAudioPlayer()
+    if (genId !== loadGenerationId) return
     art!.type = finalFormat
     startSourceTimeout()
     art!.switchUrl(realSourceUrl)
