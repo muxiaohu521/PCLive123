@@ -190,13 +190,13 @@ function ensureSourcesFile() {
     const raw = fs.readFileSync(sourcesFilePath, 'utf8')
     const arr = JSON.parse(raw)
     if (Array.isArray(arr) && arr.length > 0) {
-      debugLog('SOURCES: Loaded ' + arr.length + ' sources from file')
+      logInfo('SOURCES: Loaded ' + arr.length + ' sources from file')
       return arr
     }
   } catch (e) {
-    debugLog('SOURCES: Read error: ' + e.message)
+    logError('SOURCES: Read error: ' + e.message)
   }
-  debugLog('SOURCES: sources.json missing or invalid, returning empty list')
+  logWarn('SOURCES: sources.json missing or invalid, returning empty list')
   return []
 }
 
@@ -206,17 +206,17 @@ function loadSourcesFile() {
 
 function saveSourcesFile(list) {
   if (!Array.isArray(list)) {
-    debugLog('SOURCES: saveSourcesFile received non-array, ignoring')
+    logWarn('SOURCES: saveSourcesFile received non-array, ignoring')
     return false
   }
   try {
     const tmpPath = sourcesFilePath + '.tmp'
     fs.writeFileSync(tmpPath, JSON.stringify(list, null, 2), 'utf8')
     fs.renameSync(tmpPath, sourcesFilePath)
-    debugLog('SOURCES: Saved ' + list.length + ' sources to file')
+    logInfo('SOURCES: Saved ' + list.length + ' sources to file')
     return true
   } catch (e) {
-    debugLog('SOURCES: Failed to save sources file: ' + e.message)
+    logError('SOURCES: Failed to save sources file: ' + e.message)
     try { fs.unlinkSync(sourcesFilePath + '.tmp') } catch (_) {}
     throw e
   }
@@ -237,6 +237,7 @@ let floatWindow = null
 let floatVideoInfo = null
 
 function createWindow() {
+  logDebug('WINDOW: creating main window')
   const { width, height } = store.get('windowBounds', { width: 1280, height: 800 })
 
   mainWindow = new BrowserWindow({
@@ -274,6 +275,10 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    logDebug('WINDOW: main window loaded')
+  })
+
   mainWindow.on('resize', () => {
     const [w, h] = mainWindow.getSize()
     store.set('windowBounds', { width: w, height: h })
@@ -284,16 +289,23 @@ function createWindow() {
   })
 }
 
+// ============ Logger: dev=详细日志 / prod=精简日志 ============
+const LOG_LEVEL = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, VERBOSE: 4 }
+const LOG_LABEL = ['ERROR', 'WARN ', 'INFO ', 'DEBUG', 'TRACE']
+const CURRENT_LOG_LEVEL = isDev ? LOG_LEVEL.VERBOSE : LOG_LEVEL.INFO
+
 const logDir = (() => {
-  if (isDev) return path.join(__dirname, '..', 'logs')
-  const dir = path.join(dataDir, 'logs')
+  const dir = isDev ? path.join(__dirname, '..', 'logs') : path.join(dataDir, 'logs')
   try { fs.mkdirSync(dir, { recursive: true }) } catch (_) {}
   return dir
 })()
 const debugLogFile = path.join(logDir, 'pclive-debug.log')
 try { fs.writeFileSync(debugLogFile, '=== PCLive Debug ===\n') } catch (_) {}
-function debugLog(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}`
+
+function writeLog(level, msg) {
+  if (level > CURRENT_LOG_LEVEL) return
+  const label = LOG_LABEL[level] || '????'
+  const line = `[${new Date().toISOString()}] [${label}] ${msg}`
   try { fs.appendFileSync(debugLogFile, line + '\n') } catch (_) {}
   if (msg.startsWith('FFMPEG:') || msg.startsWith('FFMPEG SESSION')) {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -301,6 +313,14 @@ function debugLog(msg) {
     }
   }
 }
+
+function logError(msg) { writeLog(LOG_LEVEL.ERROR, msg) }
+function logWarn(msg)  { writeLog(LOG_LEVEL.WARN, msg) }
+function logInfo(msg)  { writeLog(LOG_LEVEL.INFO, msg) }
+function logDebug(msg) { writeLog(LOG_LEVEL.DEBUG, msg) }
+function logVerbose(msg) { writeLog(LOG_LEVEL.VERBOSE, msg) }
+
+function debugLog(msg) { logDebug(msg) }
 
 // ============ Encoding detection ============
 const textDecoderUtf8 = new TextDecoder('utf-8', { fatal: false })
@@ -477,6 +497,7 @@ async function fetchUrlWithDns(url, reqHeaders, maxRedirects = 5, timeout = 2000
     for (const [domain, ip] of customHosts) {
       if (url.includes(domain)) {
         const replaced = url.replace(domain, ip)
+        logVerbose(`FETCH DNS: hosts rewrite ${domain} → ${ip}`)
         url = replaced
         break
       }
@@ -484,6 +505,7 @@ async function fetchUrlWithDns(url, reqHeaders, maxRedirects = 5, timeout = 2000
   }
 
   const parsed = new URL(url)
+  const startTime = Date.now()
   return new Promise((resolve, reject) => {
     const sendHeaders = buildReqHeaders(parsed, reqHeaders)
 
@@ -534,16 +556,17 @@ async function fetchUrlWithDns(url, reqHeaders, maxRedirects = 5, timeout = 2000
           resolve(stegoText)
           return
         }
+        logVerbose(`FETCH INTERNAL: completed in ${Date.now() - startTime}ms url=${url} size=${raw.length}`)
         resolve(smartDecode(raw, ct))
       })
       res.on('error', (e) => {
-        debugLog(`FETCH INTERNAL: res error for ${url}: ${e.message}`)
+        logError(`FETCH INTERNAL: res error for ${url}: ${e.message}`)
         reject(e)
       })
     })
 
     req.on('error', (e) => {
-      debugLog(`FETCH INTERNAL: req error for ${url}: ${e.message} code=${e.code}`)
+      logError(`FETCH INTERNAL: req error for ${url}: ${e.message} code=${e.code}`)
       reject(e)
     })
     req.on('timeout', () => {
@@ -873,13 +896,13 @@ function doProxyFetchNode(url, sessionHeaders, redirectsLeft, resolve, reject, d
       })
     })
     res.on('error', e => {
-      debugLog(`PROXY-FETCH-NODE RES ERROR depth=${depth}: ${e.message}`)
+      logError(`PROXY-FETCH-NODE RES ERROR depth=${depth}: ${e.message}`)
       reject(e)
     })
   })
 
   req.on('error', e => {
-    debugLog(`PROXY-FETCH-NODE REQ ERROR depth=${depth}: ${e.message}`)
+    logError(`PROXY-FETCH-NODE REQ ERROR depth=${depth}: ${e.message}`)
     reject(e)
   })
   req.on('timeout', () => {
@@ -902,11 +925,13 @@ function proxyFetch(sessionBaseUrl, sessionHeaders, reqPath, maxRedirects = 20) 
   }
 
   return new Promise((resolve, reject) => {
+    logVerbose(`PROXY-FETCH: reqPath=${reqPath} depth=0`)
     doProxyFetch(targetUrl, sessionHeaders, maxRedirects, resolve, reject, 0)
   })
 }
 
 function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth) {
+  logVerbose(`PROXY-FETCH: url=${url.substring(0, 100)} depth=${depth}`)
   if (redirectsLeft <= 0) return reject(new Error('Too many redirects'))
   if (!/^https?:\/\//i.test(url)) return reject(new Error('Invalid URL: ' + url))
 
@@ -918,16 +943,16 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
   // Direct format URLs (with clear media extensions) use Node.js http/https
   // for reliable streaming with old CDNs. Others use net.request for browser simulation.
   if (isDirectFormatUrl(url)) {
+    logVerbose(`PROXY-FETCH: branch=Node.js (direct format) url=${url.substring(0, 80)}`)
     doProxyFetchNode(url, sessionHeaders, redirectsLeft, resolve, reject, depth)
     return
   }
 
-  // Use Electron's net.request (Chromium network stack) with manual redirect handling.
-  // redirect:'manual' lets us capture Set-Cookie from every redirect response.
+  logVerbose(`PROXY-FETCH: branch=net.request (browser sim) url=${url.substring(0, 80)}`)
+  // Use Electron's net.request (Chromium network stack) with automatic redirect handling.
   const req = net.request({
     method: 'GET',
-    url: url,
-    redirect: 'manual',
+    url: parsed.href,
   })
 
   // Apply headers through Electron's net API
@@ -954,7 +979,7 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
     }
 
     if ([301, 302, 303, 307, 308].includes(status) && loc) {
-      res.destroy()
+      resolved = true; clearTimeout(timeout); res.destroy()
       const nextUrl = resolveUrl(parsed.href, loc)
       doProxyFetch(nextUrl, sessionHeaders, redirectsLeft - 1, resolve, reject, depth + 1)
       return
@@ -990,7 +1015,7 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
       if (resolved) return
       resolved = true
       clearTimeout(timeout)
-      debugLog(`PROXY RES ERROR depth=${depth}: ${e.message}`)
+      logError(`PROXY RES ERROR depth=${depth}: ${e.message}`)
       reject(e)
     })
   })
@@ -999,7 +1024,7 @@ function doProxyFetch(url, sessionHeaders, redirectsLeft, resolve, reject, depth
     if (resolved) return
     resolved = true
     clearTimeout(timeout)
-    debugLog(`PROXY REQ ERROR depth=${depth}: ${e.message}`)
+    logError(`PROXY REQ ERROR depth=${depth}: ${e.message}`)
     reject(e)
   })
 
@@ -1102,7 +1127,7 @@ function ensureLocalFileServer() {
 
     localFileServer.listen(0, '127.0.0.1', () => {
       localFileServerPort = localFileServer.address().port
-      debugLog(`LOCAL-FILE-SVR: server on port ${localFileServerPort}`)
+      logInfo(`LOCAL-FILE-SVR: server on port ${localFileServerPort}`)
       resolve()
     })
     localFileServer.on('error', reject)
@@ -1110,6 +1135,7 @@ function ensureLocalFileServer() {
 }
 
 function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft) {
+  logVerbose(`STREAM-PIPE: start url=${targetUrl.substring(0, 80)} redirectsLeft=${redirectsLeft}`)
   if (redirectsLeft <= 0) {
     if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('too many redirects') }
     return
@@ -1162,7 +1188,7 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
         const currentReferer = sendHeaders['Referer'] || ''
         const targetOrigin = `${parsed.protocol}//${parsed.host}`
         if (currentReferer && !currentReferer.startsWith(targetOrigin)) {
-          debugLog(`[STREAM-PIPE-NODE] 403 with cross-origin Referer, retry with target origin Referer`)
+          logWarn(`[STREAM-PIPE-NODE] 403 with cross-origin Referer, retry with target origin Referer`)
           const retryHeaders = { ...sessionHeaders, 'Referer': `${targetOrigin}/`, 'Origin': targetOrigin }
           return pipeLiveStreamNode(clientReq, clientRes, targetUrl, retryHeaders, redirectsLeft - 1)
         }
@@ -1189,7 +1215,7 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
   })
 
   req.on('error', (e) => {
-    debugLog(`STREAM-PIPE-NODE error: ${e.message} url=${targetUrl.substring(0, 80)}`)
+    logError(`STREAM-PIPE-NODE error: ${e.message} url=${targetUrl.substring(0, 80)}`)
     if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end(e.message) }
   })
   req.on('timeout', () => {
@@ -1200,103 +1226,15 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
 }
 
 function pipeLiveStream(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft = 8) {
-  if (redirectsLeft <= 0) {
-    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('too many redirects') }
-    return
-  }
+  // Validate and forward to Node.js-based streaming (same as ffmpeg's HTTP client).
+  // Chromium net.request is intentionally NOT used here — it fails on many media
+  // servers that use non-standard HTTP (missing CRLF, HTTP/1.0, etc.).
   if (!/^https?:\/\//i.test(targetUrl)) {
     if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
     return
   }
 
-  let parsed
-  try { parsed = new URL(targetUrl) } catch (_) {
-    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
-    return
-  }
-
-  const sendHeaders = buildReqHeaders(parsed, sessionHeaders)
-
-  // Direct format URLs (with clear media extensions) use Node.js http/https
-  // for reliable streaming with old CDNs. Others use net.request for browser simulation.
-  if (isDirectFormatUrl(targetUrl)) {
-    pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft)
-    return
-  }
-
-  // Use Electron's net.request (Chromium network stack) with manual redirect handling.
-  // redirect:'manual' lets us capture Set-Cookie from every redirect response.
-  const req = net.request({
-    method: 'GET',
-    url: targetUrl,
-    redirect: 'manual',
-  })
-
-  if (sendHeaders) {
-    for (const [key, val] of Object.entries(sendHeaders)) {
-      try { req.setHeader(key, val) } catch (_) {}
-    }
-  }
-
-  let resolved = false
-  req.on('response', (res) => {
-    const status = res.statusCode || 200
-    const loc = (res.headers['location'] || res.headers['Location'] || '')
-
-    // Parse Set-Cookie from response headers (now works for every redirect step)
-    const setCookieData = extractSetCookieHeaders(res.headers)
-    if (setCookieData) {
-      try { parseSetCookie(setCookieData, parsed.href) } catch (_) {}
-    }
-
-    if ([301, 302, 303, 307, 308].includes(status) && loc) {
-      res.destroy()
-      const nextUrl = resolveUrl(parsed.href, loc)
-      return pipeLiveStream(clientReq, clientRes, nextUrl, sessionHeaders, redirectsLeft - 1)
-    }
-
-    const ct = (res.headers['content-type'] || res.headers['Content-Type'] || 'video/mp2t').toLowerCase()
-
-    if (status >= 400 || /^(text\/html|text\/plain|application\/json|application\/xml)/.test(ct)) {
-      res.destroy()
-      if (status === 403 && redirectsLeft > 1) {
-        const currentReferer = sendHeaders['Referer'] || ''
-        const targetOrigin = `${parsed.protocol}//${parsed.host}`
-        if (currentReferer && !currentReferer.startsWith(targetOrigin)) {
-          debugLog(`[STREAM-PIPE] 403 with cross-origin Referer, retry with target origin Referer`)
-          const retryHeaders = { ...sessionHeaders, 'Referer': `${targetOrigin}/`, 'Origin': targetOrigin }
-          return pipeLiveStream(clientReq, clientRes, targetUrl, retryHeaders, redirectsLeft - 1)
-        }
-      }
-      if (!clientRes.headersSent) {
-        clientRes.writeHead(status >= 400 ? status : 415, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*' })
-        clientRes.end()
-      }
-      return
-    }
-
-    const respHeaders = {
-      'Content-Type': ct,
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    }
-    if (res.headers['content-length']) respHeaders['Content-Length'] = res.headers['content-length']
-    clientRes.writeHead(status, respHeaders)
-    resolved = true
-
-    res.pipe(clientRes)
-    res.on('error', () => { try { clientRes.end() } catch (_) {} })
-    clientReq.on('close', () => { try { res.destroy() } catch (_) {} })
-  })
-
-  req.on('error', (e) => {
-    if (resolved) return
-    debugLog(`STREAM-PIPE error: ${e.message} url=${targetUrl.substring(0, 80)}`)
-    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end(e.message) }
-  })
-
-  req.end()
+  pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft)
 }
 
 function startProxyServer() {
@@ -1305,6 +1243,7 @@ function startProxyServer() {
     proxyServer = http.createServer((clientReq, clientRes) => {
       if (clientReq.socket) clientReq.socket.setNoDelay(true)
       const urlPath = clientReq.url || ''
+      logVerbose(`PROXY-SVR: req ${clientReq.method} ${urlPath}`)
       const match = urlPath.match(/^\/session\/([^/]+)\/(.+)$/)
       if (!match) {
         clientRes.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
@@ -1373,7 +1312,7 @@ function startProxyServer() {
           clientRes.end(result.body)
         }
       }).catch(err => {
-        debugLog(`PROXY-SVR: fetch error for ${sessionId}: ${err.message}`)
+        logError(`PROXY-SVR: fetch error for ${sessionId}: ${err.message}`)
         if (!clientRes.headersSent) {
           clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' })
           clientRes.end(err.message)
@@ -1383,7 +1322,7 @@ function startProxyServer() {
 
     proxyServer.listen(0, '127.0.0.1', () => {
       proxyPort = proxyServer.address().port
-      debugLog(`PROXY-SVR: server on port ${proxyPort}`)
+      logInfo(`PROXY-SVR: server on port ${proxyPort}`)
       resolve()
     })
     proxyServer.on('error', reject)
@@ -1424,7 +1363,7 @@ function createStreamSession(baseUrl, headers, detectedFormat) {
     detectedFormat: detectedFormat || null,
   }
   streamSessions.set(sessionId, session)
-  debugLog(`SESSION CREATE: ${sessionId} url=${baseUrl.substring(0, 100)} fmt=${detectedFormat || 'auto'}`)
+  logInfo(`SESSION CREATE: ${sessionId} url=${baseUrl.substring(0, 100)} fmt=${detectedFormat || 'auto'}`)
   return sessionId
 }
 
@@ -1433,7 +1372,7 @@ function closeStreamSession(sessionId) {
   if (!session) return
   session.active = false
   streamSessions.delete(sessionId)
-  debugLog(`SESSION CLOSE: ${sessionId}`)
+  logInfo(`SESSION CLOSE: ${sessionId}`)
 }
 
 // ============ URL Sniffer Helpers ============
@@ -1586,10 +1525,23 @@ app.commandLine.appendSwitch('dns-result-order', 'ipv4first')
 app.commandLine.appendSwitch('ignore-certificate-errors')
 
 app.whenReady().then(() => {
+  logDebug('APP: ready, starting services')
   createWindow()
 
   // Start the universal proxy server
   startProxyServer()
+
+  // --- Dev-mode: periodic memory monitoring ---
+  if (isDev) {
+    const memInterval = setInterval(() => {
+      const mem = process.memoryUsage()
+      const heapUsedMB = (mem.heapUsed / 1024 / 1024).toFixed(1)
+      const heapTotalMB = (mem.heapTotal / 1024 / 1024).toFixed(1)
+      const rssMB = (mem.rss / 1024 / 1024).toFixed(1)
+      logVerbose(`MEMORY: heap=${heapUsedMB}/${heapTotalMB}MB rss=${rssMB}MB`)
+    }, 60000)
+    memInterval.unref()
+  }
 
   // --- Dev-mode self-diagnostic ---
   if (isDev) {
@@ -1765,11 +1717,11 @@ app.whenReady().then(() => {
         const parts = entry.split('=', 2)
         if (parts.length === 2) customHosts.set(parts[0].trim(), parts[1].trim())
       }
-      debugLog(`NET: hosts set: ${customHosts.size} entries`)
+      logInfo(`NET: hosts set: ${customHosts.size} entries`)
     }
     if (config.proxy) {
       proxyConfig = config.proxy
-      debugLog(`NET: proxy set: ${JSON.stringify(config.proxy)}`)
+      logInfo(`NET: proxy set: ${JSON.stringify(config.proxy)}`)
     }
     return true
   })
@@ -1777,7 +1729,7 @@ app.whenReady().then(() => {
   ipcMain.handle('clear-networking-config', async () => {
     customHosts.clear()
     proxyConfig = null
-    debugLog('NET: config cleared')
+    logInfo('NET: config cleared')
     return true
   })
 
@@ -1797,6 +1749,7 @@ app.whenReady().then(() => {
       const content = fs.readFileSync(filePath, 'utf8')
       return { filePath, content, fileName: path.basename(filePath) }
     } catch (e) {
+      logError('FILE: openFile read error: ' + e.message)
       return { error: e.message }
     }
   })
@@ -1816,6 +1769,7 @@ app.whenReady().then(() => {
       fs.writeFileSync(result.filePath, options.content || '', 'utf8')
       return { filePath: result.filePath, success: true }
     } catch (e) {
+      logError('FILE: saveFile write error: ' + e.message)
       return { error: e.message }
     }
   })
@@ -1825,6 +1779,7 @@ app.whenReady().then(() => {
       const content = fs.readFileSync(filePath, 'utf8')
       return { filePath, content, fileName: path.basename(filePath), success: true }
     } catch (e) {
+      logError('FILE: read error: ' + e.message)
       return { error: e.message }
     }
   })
@@ -1835,9 +1790,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('file:write', async (_event, filePath, content) => {
     try {
+      try { fs.mkdirSync(path.dirname(filePath), { recursive: true }) } catch (_) {}
       fs.writeFileSync(filePath, content || '', 'utf8')
       return { success: true, filePath }
     } catch (e) {
+      logError('FILE: write error: ' + e.message)
       return { error: e.message }
     }
   })
@@ -1882,20 +1839,20 @@ app.whenReady().then(() => {
           }
         }
       } catch (e) {
-        debugLog('SCAN_DIR: error reading ' + dir + ': ' + (e.message || e))
+        logError('SCAN_DIR: error reading ' + dir + ': ' + (e.message || e))
       }
       return results
     }
 
     const files = scanDir(dirPath)
-    debugLog('SCAN_DIR: found ' + files.length + ' video files in ' + dirPath)
+    logInfo('SCAN_DIR: found ' + files.length + ' video files in ' + dirPath)
     return { directoryPath: dirPath, files }
   })
 
   ipcMain.handle('fetch-url', async (_event, url, headers = {}) => {
     debugLog(`FETCH REQUEST: url=${url} isDev=${isDev}`)
     if (!/^https?:\/\//i.test(url)) {
-      debugLog(`FETCH SKIP (bad URL): ${url}`)
+      logWarn(`FETCH SKIP (bad URL): ${url}`)
       throw new Error('URL must start with http:// or https://')
     }
     try {
@@ -1903,16 +1860,16 @@ app.whenReady().then(() => {
       debugLog(`FETCH OK: ${url} size=${(result||'').length}`)
       return result
     } catch (e) {
-      debugLog(`FETCH FAIL (primary): ${url}  ${e.message}  stack=${(e.stack||'').substring(0,200)}`)
+      logError(`FETCH FAIL (primary): ${url}  ${e.message}  stack=${(e.stack||'').substring(0,200)}`)
       // Fallback: retry with Chrome UA if primary request failed
       try {
         const fallbackHeaders = { ...headers, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' }
-        debugLog(`FETCH RETRY (fallback UA): ${url}`)
+        logWarn(`FETCH RETRY (fallback UA): ${url}`)
         const result = await fetchUrlWithDns(url, fallbackHeaders, 8)
         debugLog(`FETCH OK (fallback): ${url} size=${(result||'').length}`)
         return result
       } catch (e2) {
-        debugLog(`FETCH FAIL (fallback): ${url}  ${e2.message}  stack=${(e2.stack||'').substring(0,200)}`)
+        logError(`FETCH FAIL (fallback): ${url}  ${e2.message}  stack=${(e2.stack||'').substring(0,200)}`)
         throw e2
       }
     }
@@ -1920,6 +1877,7 @@ app.whenReady().then(() => {
 
   // --- Probe stream format (ExoPlayer-style auto-detection) ---
   ipcMain.handle('probe-stream', async (_event, url, headers) => {
+    logVerbose(`IPC probe-stream: url=${(url||'').substring(0, 80)}`)
     if (/^rtmp:\/\//i.test(url)) return { format: 'rtmp', contentType: '', finalUrl: url }
     if (/^rtsp:\/\//i.test(url)) return { format: 'rtsp', contentType: '', finalUrl: url }
     if (!/^https?:\/\//i.test(url)) return { format: 'unknown', contentType: '', finalUrl: url }
@@ -1995,13 +1953,14 @@ app.whenReady().then(() => {
         isFlv: probe.isFlv
       }
     } catch (e) {
-      debugLog('PROBE-STREAM failed: ' + e.message)
+      logWarn('PROBE-STREAM failed: ' + e.message)
       return { format: 'unknown', contentType: '', finalUrl: url }
     }
   })
 
   // --- Create stream session (resolve URL + start proxy) ---
   ipcMain.handle('create-stream-session', async (_event, url, headers, detectedFormat) => {
+    logDebug(`IPC create-stream-session: url=${(url||'').substring(0, 80)} fmt=${detectedFormat || 'auto'}`)
     await startProxyServer()
     let resolvedUrl = url
     let format = detectedFormat || 'unknown'
@@ -2040,14 +1999,14 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   ipcMain.handle('register-video-headers', async (_event, domainKey, domainName, headers) => {
     if (!domainKey || !domainName) return false
     videoHeaderDomains.set(domainKey, { domainName, ...(headers || {}) })
-    debugLog(`VIDEO-HDR: registered ${domainKey} → ${domainName} (${JSON.stringify(headers).slice(0, 100)})`)
+    logInfo(`VIDEO-HDR: registered ${domainKey} → ${domainName} (${JSON.stringify(headers).slice(0, 100)})`)
     return true
   })
 
   ipcMain.handle('unregister-video-headers', async (_event, domainKey) => {
     if (!domainKey) return false
     videoHeaderDomains.delete(domainKey)
-    debugLog(`VIDEO-HDR: unregistered ${domainKey}`)
+    logInfo(`VIDEO-HDR: unregistered ${domainKey}`)
     return true
   })
 
@@ -2057,6 +2016,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       const devices = await dlna.discoverDevices()
       return { success: true, devices }
     } catch (e) {
+      logError('DLNA: discover error: ' + e.message)
       return { success: false, error: e.message, devices: [] }
     }
   })
@@ -2070,8 +2030,10 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       const device = devices[deviceIndex]
       await dlna.setAvTransportUri(device, videoUrl)
       await dlna.playDevice(device)
+      logInfo(`DLNA: cast to device[${deviceIndex}] url=${videoUrl.substring(0, 80)}`)
       return { success: true }
     } catch (e) {
+      logError('DLNA: cast error: ' + e.message)
       return { success: false, error: e.message }
     }
   })
@@ -2085,6 +2047,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       await dlna.stopDevice(devices[deviceIndex])
       return { success: true }
     } catch (e) {
+      logError('DLNA: stop error: ' + e.message)
       return { success: false, error: e.message }
     }
   })
@@ -2098,6 +2061,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       await dlna.pauseDevice(devices[deviceIndex])
       return { success: true }
     } catch (e) {
+      logError('DLNA: pause error: ' + e.message)
       return { success: false, error: e.message }
     }
   })
@@ -2111,6 +2075,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       await dlna.setVolume(devices[deviceIndex], volume)
       return { success: true }
     } catch (e) {
+      logError('DLNA: setVolume error: ' + e.message)
       return { success: false, error: e.message }
     }
   })
@@ -2172,9 +2137,10 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         floatWindow.webContents.openDevTools({ mode: 'detach' })
       }
 
+      logInfo('FLOAT-WINDOW: created')
       return true
     } catch (e) {
-      logger('error', 'create-float-window error:', e.message)
+      logError('FLOAT-WINDOW: create error: ' + e.message)
       return false
     }
   })
@@ -2216,11 +2182,13 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   // When user clicks "play" on a sniff result with siteMeta (Bilibili, CCTV, etc.),
   // this generates a FRESH URL from the site's API right now.
   ipcMain.handle('resolve-external-play-url', async (_event, siteMeta) => {
+    logDebug(`IPC resolve-external-play-url: site=${(siteMeta?.site || '?')} page=${(siteMeta?.pageUrl || '').substring(0, 50)}`)
     if (!siteMeta || !siteMeta.site) return { success: false, urls: [] }
     try {
       const urls = await sniffer.resolvePlayUrl(siteMeta)
       return { success: true, urls }
     } catch (e) {
+      logError('RESOLVE-PLAY-URL: error for site=' + (siteMeta?.site || '?') + ': ' + e.message)
       return { success: false, urls: [], error: e.message }
     }
   })
@@ -2228,6 +2196,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   // --- URL Sniffer: extract video/stream URLs from a webpage ---
   // Phase 1: Quick HTML regex extraction; Phase 2: Deep sniff with BrowserWindow + webRequest intercept
   ipcMain.handle('sniff-url', async (_event, pageUrl) => {
+    logDebug(`IPC sniff-url: page=${(pageUrl||'').substring(0, 80)}`)
     if (!/^https?:\/\//i.test(pageUrl)) {
       return { success: false, error: 'URL must start with http:// or https://', urls: [] }
     }
@@ -2262,7 +2231,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         phase = 'quick'
       }
     } catch (_) {
-      // Quick extraction failed, proceed to deep sniff
+      logWarn('SNIFF: quick extraction failed for ' + pageUrl.substring(0, 60))
     }
 
     // Phase 2: Deep sniff (BrowserWindow + webRequest + JS injection)
@@ -2281,7 +2250,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         phase = phase ? 'quick+deep' : 'deep'
       }
     } catch (_) {
-      // Deep sniff failed, use quick results only
+      logWarn('SNIFF: deep sniff failed for ' + pageUrl.substring(0, 60))
     }
 
     // Phase 3: Generate fresh playable URLs from site APIs (Bilibili, CCTV, etc.)
@@ -2300,7 +2269,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
           if (u && !seenUrls.has(u)) seenUrls.add(u)
         }
         if (freshUrlSet.length > 0) phase = phase ? phase + '+fresh' : 'fresh'
-      } catch (_) {}
+      } catch (_) { logWarn('SNIFF: fresh URL generation failed for site=' + (deepMetadata?.site || '?') + ' page=' + pageUrl.substring(0, 60)) }
     }
 
     if (seenUrls.size === 0) {
@@ -2373,16 +2342,16 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         filePath,
       ], { timeout: 15000 }, (err, stdout) => {
         if (err) {
-          debugLog(`FFPROBE: error: ${err.message}`)
+          logWarn(`FFPROBE: error: ${err.message}`)
           resolve(null)
           return
         }
         const dur = parseFloat(String(stdout).trim())
         if (!isNaN(dur) && dur > 0) {
-          debugLog(`FFPROBE: detected duration=${dur}s for ${filePath}`)
+          logInfo(`FFPROBE: detected duration=${dur}s for ${filePath}`)
           resolve(dur)
         } else {
-          debugLog(`FFPROBE: could not parse duration from "${String(stdout).trim()}"`)
+          logWarn(`FFPROBE: could not parse duration from "${String(stdout).trim()}"`)
           resolve(null)
         }
       })
@@ -2420,6 +2389,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   })
 
   ipcMain.handle('ffmpeg:createSession', async (_event, sourceUrl, headers, ffmpegPath, seekTime, inputFormat) => {
+    logDebug(`IPC ffmpeg:createSession: src=${(sourceUrl||'').substring(0, 80)} seek=${seekTime||0} fmt=${inputFormat||'auto'}`)
     const sessionId = generateId()
 
     let inputUrl = sourceUrl
@@ -2435,15 +2405,15 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       } catch (_) {}
     }
 
-    debugLog(`FFMPEG: createSession sourceUrl=${sourceUrl} inputUrl=${inputUrl} isLocalFile=${isLocalFile} seekTime=${seekTime}`)
+    logInfo(`FFMPEG: createSession sourceUrl=${sourceUrl} inputUrl=${inputUrl} isLocalFile=${isLocalFile} seekTime=${seekTime}`)
 
     var probedDuration = null
     if (isLocalFile) {
       try {
         fs.accessSync(inputUrl, fs.constants.R_OK)
-        debugLog(`FFMPEG: local file accessible: ${inputUrl}`)
+        logInfo(`FFMPEG: local file accessible: ${inputUrl}`)
       } catch (e) {
-        debugLog(`FFMPEG: local file NOT accessible: ${inputUrl} - ${e.message}`)
+        logError(`FFMPEG: local file NOT accessible: ${inputUrl} - ${e.message}`)
         return { success: false, error: `File not accessible: ${inputUrl} - ${e.message}` }
       }
       // 用 FFprobe 提前获取真实时长，因为 fMP4 输出到 stdout 管道时 mehd.fragment_duration 永远为 0
@@ -2493,8 +2463,8 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       '-movflags', movFlags,
       '-',
     ]
-    debugLog(`FFMPEG: spawn ${ffmpegPath} ${ffmpegArgs.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`)
-    debugLog(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFile}, movFlags=${movFlags}`)
+    logInfo(`FFMPEG: spawn ${ffmpegPath} ${ffmpegArgs.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`)
+logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFile}, movFlags=${movFlags}`)
 
     let ffmpegProc
     try {
@@ -2524,7 +2494,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       const errorKeywords = ['error', 'Error', 'ERROR', 'Invalid', 'failed', 'Failed', 'FAILED', 'No such', 'Permission denied', 'Unable', 'not found', 'Unsupported']
       const trimmed = text.trim()
       if (errorKeywords.some(kw => trimmed.includes(kw))) {
-        debugLog(`FFMPEG: [stderr-error] ${trimmed.substring(0, 500)}`)
+        logWarn(`FFMPEG: [stderr-error] ${trimmed.substring(0, 500)}`)
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('ffmpeg:stderr', { sessionId, line: trimmed.substring(0, 500) })
         }
@@ -2576,7 +2546,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         try { ffmpegProc.kill('SIGTERM') } catch (_) {}
         try { ffmpegServer.close() } catch (_) {}
         const lastStderr = stderrLines.slice(-30).join('\n')
-        debugLog(`FFMPEG: FAIL ${errorMsg} stderr=${lastStderr.substring(0, 2000)}`)
+        logError(`FFMPEG: FAIL ${errorMsg} stderr=${lastStderr.substring(0, 2000)}`)
         resolve({ success: false, error: errorMsg + (lastStderr ? '\nFFmpeg stderr:\n' + lastStderr : '') })
       }
 
@@ -2585,13 +2555,13 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         if (serverPort && bufferChunks.length > 0) {
           resolved = true
           ffmpegSessions.set(sessionId, { active: true, proc: ffmpegProc, server: ffmpegServer, sessionId })
-          debugLog(`FFMPEG SESSION CREATE: ${sessionId} on port ${serverPort}, buffer=${bufferBytes}B`)
+          logInfo(`FFMPEG SESSION CREATE: ${sessionId} on port ${serverPort}, buffer=${bufferBytes}B`)
           resolve({ success: true, sessionId, proxyUrl: serverProxyUrl, port: serverPort, detectedFormat: 'mp4', duration: probedDuration })
         }
       }
 
       ffmpegProc.on('error', (err) => {
-        debugLog(`FFMPEG: process spawn error: ${err.message}`)
+        logError(`FFMPEG: process spawn error: ${err.message}`)
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('ffmpeg:stderr', { sessionId, line: `SPAWN ERROR: ${err.message}` })
         }
@@ -2600,7 +2570,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
 
       ffmpegProc.on('close', (code) => {
         const lastStd = stderrLines.slice(-5).join(' | ')
-        debugLog(`FFMPEG: process closed, code=${code}, resolved=${resolved}, bufferChunks=${bufferChunks.length}, lastStderr=${lastStd.substring(0, 300)}`)
+        logInfo(`FFMPEG: process closed, code=${code}, resolved=${resolved}, bufferChunks=${bufferChunks.length}, lastStderr=${lastStd.substring(0, 300)}`)
         if (!resolved) {
           if (code !== 0 && code !== null) {
             failResolve(`FFmpeg exited with code ${code}`)
@@ -2645,7 +2615,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       ffmpegServer.listen(0, '127.0.0.1', () => {
         serverPort = ffmpegServer.address().port
         serverProxyUrl = `http://127.0.0.1:${serverPort}/stream`
-        debugLog(`FFMPEG: server ready on port ${serverPort}, waiting for first data...`)
+        logInfo(`FFMPEG: server ready on port ${serverPort}, waiting for first data...`)
         tryResolve()
         setTimeout(() => {
           if (!resolved) {
@@ -2655,7 +2625,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       })
 
       ffmpegServer.on('error', (e) => {
-        debugLog(`FFMPEG: server error: ${e.message}`)
+        logError(`FFMPEG: server error: ${e.message}`)
         resolve({ success: false, error: 'server error: ' + e.message })
       })
     })
@@ -2668,7 +2638,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       try { s.proc.kill('SIGTERM') } catch (_) {}
       try { s.server.close() } catch (_) {}
       ffmpegSessions.delete(sessionId)
-      debugLog(`FFMPEG SESSION CLOSE: ${sessionId}`)
+      logInfo(`FFMPEG SESSION CLOSE: ${sessionId}`)
     }
     return true
   })
@@ -2679,7 +2649,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       const token = generateId()
       localFileSessions.set(token, { filePath, active: true })
       const proxyUrl = `http://127.0.0.1:${localFileServerPort}/local-file/${token}`
-      debugLog(`LOCAL-FILE-SVR: serve ${filePath} as ${proxyUrl}`)
+      logInfo(`LOCAL-FILE-SVR: serve ${filePath} as ${proxyUrl}`)
       return { success: true, token, proxyUrl }
     } catch (e) {
       return { success: false, error: e.message }
@@ -2688,11 +2658,12 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
 
   ipcMain.handle('local-file:close', async (_event, token) => {
     localFileSessions.delete(token)
-    debugLog(`LOCAL-FILE-SVR: close ${token}`)
+    logInfo(`LOCAL-FILE-SVR: close ${token}`)
     return true
   })
 
 app.on('window-all-closed', () => {
+  logInfo('APP: window-all-closed, cleaning up sessions')
   for (const [id, session] of streamSessions) {
     session.active = false
   }
