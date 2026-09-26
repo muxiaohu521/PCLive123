@@ -1,6 +1,6 @@
 {
   "name": "pc-live",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "PC直播客户端 - 基于Electron+Vue3的桌面直播播放器",
   "license": "MIT",
   "main": "electron/main.js",

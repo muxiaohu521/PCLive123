@@ -1,4 +1,4 @@
-# PCLive v1.1 - PC 直播客户端
+# PCLive v1.2 - PC 直播客户端
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-muxiaohu521%2FPCLive123-green.svg)](https://github.com/muxiaohu521/PCLive123)
@@ -14,14 +14,24 @@
 - 基于 ArtPlayer 播放器内核，集成 HLS.js 和 mpegts.js
 - **解码模式切换**：自动 / 硬解 / 软解 / FFmpeg 解码，适配不同硬件环境
 - 频道线路切换（多线路自动切换，播放失败自动切下一个线路）
+- **本地直播源模块**：71 个精选 CCTV+卫视频道，每频道多线路，支线路独立编辑/增删
 - 音量控制、静音、暂停/播放
-- 键盘快捷键操作（上下键切频道、空格播放/暂停、数字键选台等）
+- 键盘快捷键操作（上下键切频道、左右键切线路、空格播放/暂停、数字键选台等）
 
 ### 本地视频播放
 - 支持扫描本地目录，添加本地视频/音频文件到播放列表
 - 支持 **MP4、MKV、AVI、MOV、WMV、FLV、WebM、TS、M2TS** 等主流视频格式
 - 支持 **MP3、M4A、AAC、WAV、FLAC、OPUS、WMA** 等音频格式（纯音频播放模式）
 - 三种播放模式：**单曲循环** / **顺序播放** / **随机播放**
+
+### 官网直播源（央视频）
+- 内置 **央视频**（yangshipin.cn）频道列表，覆盖 CCTV1~17、CCTV5+、卫视频道
+- 通过 Electron BrowserWindow 加载官网页面，自动注入控制面板（`YspPlayerBar`）
+- 播放控制栏功能：**上一节目 / 下一节目**、**播放/暂停**、**画质切换**（自动/1080P/720P/480P）
+- **音量/静音控制**、**播放速度调节**（0.5x~4x）
+- 支持添加、编辑、删除自定义央视频频道
+- 频道数据存储在 `data/ysp_channels.json`
+- 后台主进程 `ysp_handler.js` 负责页面渲染、DOM 分析、CDN 流地址提取
 
 ### 直播源管理
 - 内置 **37 个默认直播源**（JSON / M3U 格式），覆盖主流 TVBox 线路
@@ -117,26 +127,31 @@ PCLive/
 │   ├── sniffer.js                # URL 嗅探器（网页视频提取）
 │   ├── sniffer-preload.js        # 嗅探器预加载脚本
 │   ├── m3u8Purifier.js           # M3U8 净化器（过滤无效片段）
+│   ├── ysp_handler.js            # 央视频流处理
 │   └── shared/
 │       └── ad-filter-rules.json  # 广告过滤规则
 ├── src/                          # Vue 渲染进程源码
-│   ├── App.vue                   # 根组件（布局、键盘事件、频道导航）
+│   ├── App.vue                   # 根组件（布局、键盘事件、频道/线路导航）
 │   ├── main.ts                   # 入口（挂载 Vue、Pinia、Element Plus）
 │   ├── components/               # UI 组件
 │   │   ├── TitleBar.vue          # 自定义标题栏（窗口控制、源名称显示）
 │   │   ├── VideoPlayer.vue       # 视频播放器（ArtPlayer 封装，多格式支持）
 │   │   ├── ChannelList.vue       # 频道列表面板（搜索、分组切换）
 │   │   ├── SourceManager.vue     # 直播源管理面板（增删改、导入导出）
+│   │   ├── LocalChannelsList.vue # 本地直播源面板（71频道、逐线路编辑）
 │   │   ├── LivesPanel.vue        # 子线路列表面板
 │   │   ├── LocalVideoList.vue    # 本地视频/音频列表
 │   │   ├── ToolsDialog.vue       # 工具对话框（连通性测试、链接嗅探）
 │   │   ├── DlnaPanel.vue         # DLNA 投屏面板
+│   │   ├── YspPanel.vue          # 央视频面板
+│   │   ├── YspPlayerBar.vue      # 央视频播放控制栏
 │   │   └── SettingsPanel.vue     # 设置面板（播放、字幕、网络、广告过滤）
 │   ├── composables/              # Vue Composables
 │   │   ├── useMirrorStream.ts    # WebRTC 镜像流（悬浮窗视频同步）
-│   │   └── useSubtitle.ts        # 外挂字幕处理
+│   │   ├── useSubtitle.ts        # 外挂字幕处理
+│   │   └── useInputContextMenu.ts # 输入框右键菜单
 │   ├── store/
-│   │   └── index.ts              # Pinia Store（全局状态、频道加载、源管理）
+│   │   └── index.ts              # Pinia Store（全局状态、频道/线路排序、源管理）
 │   ├── services/                 # 业务服务层
 │   │   ├── ChannelService.ts     # 频道服务（数据获取、解密、解析）
 │   │   ├── AudioPlayer.ts        # 音频播放器（纯音频模式）
@@ -163,10 +178,15 @@ PCLive/
 │   │   └── index.ts              # 常量定义
 │   └── types/
 │       └── global.d.ts           # 全局类型声明
-├── cache/                        # 直播源解析缓存
+├── data/                         # 数据文件（全部跟踪版本控制）
+│   ├── verified_channels.json    # 本地直播源（71频道 × 多线路）
+│   ├── sources.json              # 远程直播源配置
+│   ├── ysp_channels.json         # 央视频频道配置
+│   └── cache/                    # 原始直播源缓存（37个源JSON）
+├── scripts/
+│   └── extract_common_channels.py # 频道URL提取/聚合/去重脚本
 ├── dist/                         # Vite 构建产物
 ├── index.html                    # HTML 入口
-├── sources.json                  # 默认直播源配置
 ├── vite.config.ts                # Vite 配置
 ├── tsconfig.json                 # TypeScript 配置
 ├── tsconfig.node.json            # Node 端 TS 配置
@@ -175,7 +195,7 @@ PCLive/
 ├── build_portable.ps1            # 便携版一键构建脚本（自动收集依赖、裁剪、打包）
 ├── install.bat                   # 依赖安装脚本
 ├── dev.bat                       # 开发模式启动脚本
-└── run.bat                       # 生产模式启动脚本
+├── run.bat                       # 生产模式启动脚本
 ```
 
 ---
@@ -261,8 +281,11 @@ PCLive-portable/PCLive/
 | 快捷键 | 功能 |
 |--------|------|
 | `↑` / `↓` | 切换上/下一个频道 |
+| `←` / `→` | 切换上/下一线路 |
 | `0-9` | 快速跳转到对应编号频道 |
 | `空格` | 播放 / 暂停 |
+| `K` | 打开/关闭本地直播源列表 |
+| `O` | 打开/关闭官网直播源（央视频） |
 | `Tab` | 展开/收起频道列表 |
 | `Ctrl+S` | 直播源管理面板 |
 | `Ctrl+T` | 工具面板（连通性测试 / 链接嗅探） |
@@ -276,6 +299,30 @@ PCLive-portable/PCLive/
 ---
 
 ## 直播源格式说明
+
+### 本地直播源（verified_channels.json）— v1.2 新增
+
+每条频道支持多线路，频道按 CCTV 数字序 + 卫视拼音序排列：
+
+```json
+{
+  "lives": [
+    {
+      "name": "CCTV1",
+      "urls": [
+        "http://example.com/cctv1_hd.m3u8",
+        "http://example.com/cctv1_sd.m3u8"
+      ]
+    },
+    {
+      "name": "北京卫视",
+      "urls": [
+        "http://example.com/btv1.m3u8"
+      ]
+    }
+  ]
+}
+```
 
 ### M3U 格式（推荐）
 
@@ -312,6 +359,17 @@ http://example.com/cctv1.m3u8
 ---
 
 ## 更新日志
+
+### v1.2.0
+- 新增 **本地直播源模块**（`LocalChannelsList.vue`）：71 个精选 CCTV+卫视频道，每频道数十条线路
+- 本地直播源支持 **逐线路编辑**：添加/修改/删除单条 URL，拖拽移动弹窗，暗色主题
+- 新增 **线路切换**快捷键 `←` / `→`，播放失败自动切换下一线路
+- 新增 `K` 键快速打开/关闭本地直播源列表
+- 新增 **央视频面板**（`YspPanel.vue` / `YspPlayerBar.vue`）和 `ysp_handler.js` 主进程服务
+- 频道排序：CCTV 按数字序、卫视按拼音序，多位置自动保持排序
+- 数据目录 `data/` 完整纳入版本控制（含 37 个原始直播源缓存）
+- 修复本地直播源失败/超时不自动切换线路的问题
+- 优化 `.gitignore`：移除 `cache/` 误拦规则，窄化 `*.local` / `_x*` 等通配符
 
 ### v1.1.0
 - 新增 **DLNA/UPnP 投屏**功能，支持局域网设备发现与投屏控制
