@@ -5,6 +5,7 @@
     <div class="main-content">
       <div class="player-area">
         <VideoPlayer
+          v-if="!store.yspWebviewUrl"
           ref="videoPlayerRef"
           :url="store.currentUrl"
           :headers="store.currentHeaders"
@@ -21,6 +22,19 @@
           @nextSource="onNextSource"
           @prevChannel="onPrevChannel"
           @nextChannel="onNextChannel"
+        />
+        <webview v-if="store.yspWebviewUrl"
+          :key="store.yspWebviewUrl"
+          ref="yspWebviewRef"
+          :src="store.yspWebviewUrl"
+          class="ysp-webview"
+          @dom-ready="onYspDomReady"
+          @did-start-loading="onYspStartLoading"
+          @did-stop-loading="onYspStopLoading"
+          @did-finish-load="onYspWebviewReady"
+          @did-fail-load="onYspFailLoad"
+          @crashed="onYspCrashed"
+          @console-message="onYspConsole"
         />
       </div>
 
@@ -58,9 +72,13 @@
           @close="store.showSettings = false"
           @saved="onSettingsSaved"
         />
+        <YspPanel
+          v-if="store.showYspPanel"
+          @close="store.showYspPanel = false"
+        />
       </div>
 
-      <div class="bottom-bar" v-if="showBottomBar">
+      <div class="bottom-bar" v-if="showBottomBar && !store.yspWebviewUrl">
         <div class="channel-info">
           <span class="channel-name">
             {{ bottomBarTitle }}
@@ -111,6 +129,7 @@ import SettingsPanel from '@/components/SettingsPanel.vue'
 import FloatView from '@/views/FloatView.vue'
 import LocalVideoList from '@/components/LocalVideoList.vue'
 import LocalChannelsList from '@/components/LocalChannelsList.vue'
+import YspPanel from '@/components/YspPanel.vue'
 
 const store = useAppStore()
 const {
@@ -125,6 +144,7 @@ const {
 } = useInputContextMenu()
 const appRef = ref<HTMLElement | null>(null)
 const videoPlayerRef = ref<InstanceType<typeof VideoPlayer>>()
+const yspWebviewRef = ref<any>(null)
 const isFloatMode = ref(window.location.hash === '#/float')
 const showBottomBar = ref(true)
 let hideTimer: ReturnType<typeof setTimeout> | null = null
@@ -260,6 +280,7 @@ onMounted(async () => {
   await store.initSources()
   await store.loadChannels()
   store.loadLocalChannels()
+  await store.loadYspChannels()
   registerGlobalListener()
 
   appRef.value?.focus()
@@ -310,6 +331,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showSettings = false
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -323,6 +345,7 @@ function onKeyDown(e: KeyboardEvent) {
     store.showSettings = false
     store.showLocalVideoList = false
     store.showLocalChannelsList = false
+    store.showYspPanel = false
     return
   }
 
@@ -346,6 +369,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -358,6 +382,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -370,6 +395,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showSourceManager = false
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -382,6 +408,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showSourceManager = false
       store.showLivesPanel = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -394,6 +421,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showSourceManager = false
       store.showLivesPanel = false
       store.showLocalVideoList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -407,6 +435,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -421,6 +450,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLocalVideoList = false
       store.showLivesPanel = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
     }
     return
   }
@@ -435,6 +465,40 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLocalVideoList = false
       store.showLivesPanel = false
       store.showLocalChannelsList = false
+      store.showYspPanel = false
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'yspPanel')) {
+    e.preventDefault()
+    store.showYspPanel = !store.showYspPanel
+    if (store.showYspPanel) {
+      store.showChannelList = false
+      store.showSourceManager = false
+      store.showToolsDialog = false
+      store.showLocalVideoList = false
+      store.showLivesPanel = false
+      store.showLocalChannelsList = false
+    } else {
+      store.yspWebviewUrl = ''
+      store.yspWebviewTitle = ''
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'prevSource')) {
+    e.preventDefault()
+    if (store.activePlayMode === 'channel' || store.activePlayMode === 'locallive') {
+      onPrevSource()
+    }
+    return
+  }
+
+  if (store.matchShortcut(e, 'nextSource')) {
+    e.preventDefault()
+    if (store.activePlayMode === 'channel' || store.activePlayMode === 'locallive') {
+      onNextSource()
     }
     return
   }
@@ -497,6 +561,13 @@ function toggleFullscreen() {
 }
 
 function onSourceError() {
+  if (store.activePlayMode === 'locallive') {
+    const info = store.localChannelCurrentInfo
+    if (info && store.localLiveChannelSourceIndex < info.urls.length - 1) {
+      store.switchLocalLiveNextSource()
+    }
+    return
+  }
   if (store.currentChannel && store.currentChannel.sourceIndex < store.currentChannel.sourceNum - 1) {
     store.switchNextSource()
   }
@@ -544,6 +615,170 @@ function onSettingsSaved(settings: Record<string, any>) {
   logger.info('[App] Settings saved:', Object.keys(settings).join(', '))
 }
 
+// ─── 央视频 webview 事件 ───
+
+function onYspConsole(e: any) {
+  logger.info(`[YSP:wv] [lvl=${e.level}] ${e.message}`)
+}
+
+function onYspStartLoading(e: any) {
+  logger.info(`[YSP:wv] did-start-loading url=${e.url}`)
+}
+
+function onYspStopLoading() {
+  logger.info('[YSP:wv] did-stop-loading')
+}
+
+function onYspFailLoad(e: any) {
+  logger.error(`[YSP:wv] did-fail-load code=${e.errorCode} desc="${e.errorDescription}" url=${e.validatedURL}`)
+}
+
+function onYspCrashed() {
+  logger.error('[YSP:wv] crashed!')
+}
+
+function onYspDomReady(event: any) {
+  const wv = event.target
+  if (!wv) return
+  logger.info('[YSP:wv] dom-ready → injecting CSS')
+
+  wv.insertCSS(`
+    html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important}
+    ::-webkit-scrollbar{display:none!important}
+    body{background:#000!important;visibility:hidden!important}
+    .header,.tv-main-con-r,.tv-home-btm,.tv-zhan,.public,.footer,.max-footer{display:none!important}
+  `)
+}
+
+function onYspWebviewReady(event: any) {
+  const wv = event.target
+  if (!wv) return
+  logger.info('[YSP:wv] did-finish-load → running diagnostic')
+
+  // 第一步：诊断 — 报告 DOM 状态
+  const diagJs = `
+    (function diag(){
+      var v = document.querySelector('video');
+      if (!v) return JSON.stringify({stage:'no_video', bodyChildren: document.body.children.length, readyState: 'N/A'});
+
+      var r = {};
+      r.stage = 'has_video';
+      r.videoId = v.id;
+      r.videoSrc = (v.src||'').substring(0,80);
+      r.videoWidth = v.videoWidth;
+      r.videoHeight = v.videoHeight;
+      r.videoReadyState = v.readyState;
+      r.videoPaused = v.paused;
+      r.videoClass = v.className;
+      r.videoComputedDisplay = getComputedStyle(v).display;
+      r.videoComputedVisibility = getComputedStyle(v).visibility;
+      r.videoComputedWidth = getComputedStyle(v).width;
+      r.videoComputedHeight = getComputedStyle(v).height;
+      r.videoComputedPosition = getComputedStyle(v).position;
+
+      var player = v.closest('.tv-main-con-l, .tv-main-con-l-vid');
+      if (player) {
+        r.playerTag = player.tagName;
+        r.playerClass = player.className;
+        r.playerComputedDisplay = getComputedStyle(player).display;
+        r.playerComputedWidth = getComputedStyle(player).width;
+        r.playerComputedHeight = getComputedStyle(player).height;
+        r.playerOffsetWidth = player.offsetWidth;
+        r.playerOffsetHeight = player.offsetHeight;
+      } else {
+        r.playerTag = 'N/A (not found)';
+      }
+
+      r.bodyChildren = document.body.children.length;
+      r.bodyComputedDisplay = getComputedStyle(document.body).display;
+      r.htmlFontSize = getComputedStyle(document.documentElement).fontSize;
+
+      return JSON.stringify(r);
+    })()
+  `
+
+  wv.executeJavaScript(diagJs).then((diagStr: string) => {
+    logger.info(`[YSP:wv] DIAG → ${diagStr}`)
+  }).catch((e2: any) => {
+    logger.error(`[YSP:wv] DIAG error: ${e2?.message || e2}`)
+  })
+
+  // 第二步：隐藏非播放器元素
+  const actionJs = `
+    (function hideUI(){
+      console.log('[hideUI] start');
+      var v = document.querySelector('video');
+      if (!v) { console.log('[hideUI] no video, will retry'); setTimeout(hideUI, 500); return; }
+      console.log('[hideUI] video found id=' + v.id + ' src=' + (v.src||'').substring(0,60));
+
+      var player = v.closest('.tv-main-con-l, .tv-main-con-l-vid');
+      if (!player) {
+        console.log('[hideUI] closest failed, trying parent walk');
+        var p = v.parentElement;
+        while (p && p !== document.body) {
+          if (p.offsetWidth > 400 && p.offsetHeight > 300) { player = p; console.log('[hideUI] found player via walk tag=' + p.tagName); break; }
+          p = p.parentElement;
+        }
+      } else {
+        console.log('[hideUI] player found via closest class=' + player.className);
+      }
+      if (!player) { console.log('[hideUI] no player found, abort'); return; }
+
+      console.log('[hideUI] hiding body children count=' + document.body.children.length);
+      for (var ci = 0; ci < document.body.children.length; ci++) {
+        document.body.children[ci].style.display = 'none';
+      }
+
+      var cur = player;
+      var chain = [];
+      while (cur && cur !== document.body && cur !== document.documentElement) {
+        chain.push(cur);
+        cur = cur.parentElement;
+      }
+      console.log('[hideUI] chain length=' + chain.length);
+
+      for (var j = 0; j < chain.length; j++) {
+        var node = chain[j];
+        node.style.display = '';
+        var parent2 = node.parentElement;
+        if (parent2) {
+          var hiddenCount = 0;
+          for (var k = 0; k < parent2.children.length; k++) {
+            if (parent2.children[k] !== node) {
+              parent2.children[k].style.display = 'none';
+              hiddenCount++;
+            }
+          }
+          console.log('[hideUI] chain[' + j + '] tag=' + node.tagName + ' class=' + node.className + ' siblings_hidden=' + hiddenCount);
+        }
+      }
+
+      document.body.style.display = '';
+      document.body.style.background = '#000';
+      document.body.style.margin = '0';
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'relative';
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+
+      player.style.cssText = 'position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;overflow:hidden!important;z-index:0!important';
+      v.style.cssText = 'position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;object-fit:contain!important;z-index:1!important';
+      document.body.style.setProperty('visibility', 'visible', 'important');
+      console.log('[hideUI] done');
+    })()
+  `
+
+  wv.executeJavaScript(actionJs).catch((e3: any) => {
+    logger.error(`[YSP:wv] hideUI error: ${e3?.message || e3}`)
+  })
+}
+
+function onCloseYspWebview() {
+  logger.info('[YSP:wv] close')
+  store.yspWebviewUrl = ''
+  store.yspWebviewTitle = ''
+}
+
 </script>
 
 <style>
@@ -581,6 +816,14 @@ body {
   flex: 1;
   position: relative;
   background: #000;
+}
+
+.ysp-webview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 .side-panels {

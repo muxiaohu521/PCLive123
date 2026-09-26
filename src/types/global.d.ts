@@ -15,6 +15,12 @@ interface NetworkingConfig {
 }
 
 declare global {
+  interface WebviewTag extends HTMLElement {
+    src: string
+    insertCSS(css: string): void
+    executeJavaScript(code: string, userGesture?: boolean): Promise<any>
+  }
+
   interface SniffResult {
     url: string
     sourceUrl: string
@@ -119,7 +125,33 @@ declare global {
 
       readLocalChannels: () => Promise<any>
       writeLocalChannels: (data: any) => Promise<boolean>
+
+      // 央视频频道列表持久化
+      readYspChannels: () => Promise<YspChannelsData>
+      writeYspChannels: (data: YspChannelsData) => Promise<boolean>
+      openYspChannelsFile: () => Promise<boolean>
+      getYspChannelsPath: () => Promise<string>
+
+      // 央视频 (yangshipin.cn) —— 提取官方频道链接
+      yspExtractChannels: () => Promise<YspChannelsResult>
     }
+  }
+
+  interface YspChannelItem {
+    name: string
+    pid: string
+    url: string
+  }
+
+  interface YspChannelsData {
+    channels: YspChannelItem[]
+  }
+
+  interface YspChannelsResult {
+    success: boolean
+    channels: YspChannelItem[]
+    count: number
+    message: string
   }
 
   interface HTMLVideoElement {

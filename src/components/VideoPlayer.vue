@@ -2152,8 +2152,8 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
 
 // ── 生命周期 ──
 
-onMounted(() => {
-  createPlayer()
+onMounted(async () => {
+  await createPlayer()
   if (props.url) {
     loadUrl(props.url, props.headers)
   }

@@ -28,7 +28,7 @@
           {{ localVideoCountText }}
         </span>
       </template>
-      <template v-else-if="store.activePlayMode === 'sniffer' && store.activeLocalLiveChannelIndex >= 0">
+      <template v-else-if="(store.activePlayMode === 'sniffer' || store.activePlayMode === 'locallive') && store.activeLocalLiveChannelIndex >= 0">
         <span class="mode-label">本地直播源</span>
         <span class="separator">|</span>
         <span class="channel-label marquee-wrap" :class="{ active: isLongText(snifferTitle) }">
@@ -40,6 +40,13 @@
         <span class="separator">|</span>
         <span class="channel-label marquee-wrap" :class="{ active: isLongText(snifferTitle) }">
           <span class="marquee-inner">{{ isLongText(snifferTitle) ? marqueeContent(snifferTitle) : snifferTitle }}</span>
+        </span>
+      </template>
+      <template v-else-if="store.yspWebviewUrl">
+        <span class="mode-label">官网直播源</span>
+        <span class="separator">|</span>
+        <span class="channel-label marquee-wrap" :class="{ active: isLongText(yspTitle) }">
+          <span class="marquee-inner">{{ isLongText(yspTitle) ? marqueeContent(yspTitle) : yspTitle }}</span>
         </span>
       </template>
       <template v-else>
@@ -84,6 +91,14 @@
       />
       <el-button
         link
+        :icon="Link"
+        title="官网直播源 (O)"
+        @click="toggleYspPanel"
+        class="title-btn ysp-btn"
+        :class="{ active: store.showYspPanel }"
+      />
+      <el-button
+        link
         :icon="Switch"
         title="直播源管理 (Ctrl+Shift+S)"
         @click="toggleSourceManager"
@@ -116,7 +131,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAppStore } from '@/store'
-import { Switch, List, Refresh, VideoCamera, Monitor } from '@element-plus/icons-vue'
+import { Switch, List, Refresh, VideoCamera, Monitor, Link } from '@element-plus/icons-vue'
 
 const store = useAppStore()
 
@@ -157,6 +172,10 @@ const snifferTitle = computed(() => {
   return store.externalPlayInfo?.title || '嗅探中'
 })
 
+const yspTitle = computed(() => {
+  return store.yspWebviewTitle || '官网直播源'
+})
+
 function toggleLocalVideoList() {
   store.showLocalVideoList = !store.showLocalVideoList
   if (store.showLocalVideoList) {
@@ -164,6 +183,7 @@ function toggleLocalVideoList() {
     store.showSourceManager = false
     store.showLivesPanel = false
     store.showLocalChannelsList = false
+    store.showYspPanel = false
   }
 }
 
@@ -174,6 +194,21 @@ function toggleLocalChannelsList() {
     store.showSourceManager = false
     store.showLivesPanel = false
     store.showLocalVideoList = false
+    store.showYspPanel = false
+  }
+}
+
+function toggleYspPanel() {
+  store.showYspPanel = !store.showYspPanel
+  if (store.showYspPanel) {
+    store.showChannelList = false
+    store.showSourceManager = false
+    store.showLivesPanel = false
+    store.showLocalVideoList = false
+    store.showLocalChannelsList = false
+  } else {
+    store.yspWebviewUrl = ''
+    store.yspWebviewTitle = ''
   }
 }
 
@@ -184,6 +219,7 @@ function toggleSourceManager() {
     store.showLivesPanel = false
     store.showLocalVideoList = false
     store.showLocalChannelsList = false
+    store.showYspPanel = false
   }
 }
 
@@ -194,6 +230,7 @@ function toggleChannelList() {
     store.showLivesPanel = false
     store.showLocalVideoList = false
     store.showLocalChannelsList = false
+    store.showYspPanel = false
   }
 }
 

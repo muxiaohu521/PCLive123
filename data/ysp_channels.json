@@ -1,0 +1,299 @@
+{
+  "channels": [
+    {
+      "name": "CCTV1 综合",
+      "url": "https://www.yangshipin.cn/tv/home",
+      "pid": ""
+    },
+    {
+      "name": "CCTV2 财经",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001800",
+      "pid": ""
+    },
+    {
+      "name": "CCTV3 综艺",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001801",
+      "pid": ""
+    },
+    {
+      "name": "CCTV4 中文国际",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001814",
+      "pid": ""
+    },
+    {
+      "name": "CCTV5 体育",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001818",
+      "pid": ""
+    },
+    {
+      "name": "CCTV5+ 体育赛事",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001817",
+      "pid": ""
+    },
+    {
+      "name": "CCTV6 电影",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600108442",
+      "pid": ""
+    },
+    {
+      "name": "CCTV7 国防军事",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600004092",
+      "pid": ""
+    },
+    {
+      "name": "CCTV8 电视剧",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001803",
+      "pid": ""
+    },
+    {
+      "name": "CCTV9 纪录",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600004078",
+      "pid": ""
+    },
+    {
+      "name": "CCTV10 科教",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001805",
+      "pid": ""
+    },
+    {
+      "name": "CCTV11 戏曲",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001806",
+      "pid": ""
+    },
+    {
+      "name": "CCTV12 社会与法",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001807",
+      "pid": ""
+    },
+    {
+      "name": "CCTV13 新闻",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001811",
+      "pid": ""
+    },
+    {
+      "name": "CCTV14 少儿",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001809",
+      "pid": ""
+    },
+    {
+      "name": "CCTV15 音乐",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001815",
+      "pid": ""
+    },
+    {
+      "name": "CCTV16 奥林匹克",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600098637",
+      "pid": ""
+    },
+    {
+      "name": "CCTV17 农业农村",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600001810",
+      "pid": ""
+    },
+    {
+      "name": "北京卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002309",
+      "pid": ""
+    },
+    {
+      "name": "江苏卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002521",
+      "pid": ""
+    },
+    {
+      "name": "东方卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002483",
+      "pid": ""
+    },
+    {
+      "name": "浙江卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002520",
+      "pid": ""
+    },
+    {
+      "name": "湖南卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002475",
+      "pid": ""
+    },
+    {
+      "name": "湖北卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002508",
+      "pid": ""
+    },
+    {
+      "name": "广东卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002485",
+      "pid": ""
+    },
+    {
+      "name": "广西卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002509",
+      "pid": ""
+    },
+    {
+      "name": "黑龙江卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002498",
+      "pid": ""
+    },
+    {
+      "name": "海南卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002506",
+      "pid": ""
+    },
+    {
+      "name": "重庆卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002531",
+      "pid": ""
+    },
+    {
+      "name": "深圳卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002481",
+      "pid": ""
+    },
+    {
+      "name": "四川卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002516",
+      "pid": ""
+    },
+    {
+      "name": "河南卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002525",
+      "pid": ""
+    },
+    {
+      "name": "福建东南卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002484",
+      "pid": ""
+    },
+    {
+      "name": "贵州卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002490",
+      "pid": ""
+    },
+    {
+      "name": "江西卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002503",
+      "pid": ""
+    },
+    {
+      "name": "辽宁卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002505",
+      "pid": ""
+    },
+    {
+      "name": "安徽卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002532",
+      "pid": ""
+    },
+    {
+      "name": "河北卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002493",
+      "pid": ""
+    },
+    {
+      "name": "天津卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600152137",
+      "pid": ""
+    },
+    {
+      "name": "吉林卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190405",
+      "pid": ""
+    },
+    {
+      "name": "陕西卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190400",
+      "pid": ""
+    },
+    {
+      "name": "甘肃卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190408",
+      "pid": ""
+    },
+    {
+      "name": "宁夏卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190737",
+      "pid": ""
+    },
+    {
+      "name": "内蒙古卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190401",
+      "pid": ""
+    },
+    {
+      "name": "云南卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190402",
+      "pid": ""
+    },
+    {
+      "name": "山西卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190407",
+      "pid": ""
+    },
+    {
+      "name": "青海卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190406",
+      "pid": ""
+    },
+    {
+      "name": "西藏卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600190403",
+      "pid": ""
+    },
+    {
+      "name": "新疆卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600152138",
+      "pid": ""
+    },
+    {
+      "name": "中国教育电视台1频道",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600171827",
+      "pid": ""
+    },
+    {
+      "name": "山东卫视",
+      "url": "https://www.yangshipin.cn/tv/home?pid=600002513",
+      "pid": ""
+    },
+    {
+      "name": "山东齐鲁频道",
+      "url": "https://v.iqilu.com/live/qlpd/",
+      "pid": ""
+    },
+    {
+      "name": "山东体育频道",
+      "url": "https://v.iqilu.com/live/typd/",
+      "pid": ""
+    },
+    {
+      "name": "山东生活频道",
+      "url": "https://v.iqilu.com/live/shpd/",
+      "pid": ""
+    },
+    {
+      "name": "山东综艺频道",
+      "url": "https://v.iqilu.com/live/zypd/",
+      "pid": ""
+    },
+    {
+      "name": "山东新闻频道",
+      "url": "https://v.iqilu.com/live/ggpd/",
+      "pid": ""
+    },
+    {
+      "name": "山东农科频道",
+      "url": "https://v.iqilu.com/live/nkpd/",
+      "pid": ""
+    },
+    {
+      "name": "山东文旅频道",
+      "url": "https://v.iqilu.com/live/yspd/",
+      "pid": ""
+    },
+    {
+      "name": "山东少儿频道",
+      "url": "https://v.iqilu.com/live/sepd/",
+      "pid": ""
+    }
+  ]
+}

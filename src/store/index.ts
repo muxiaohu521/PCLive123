@@ -263,11 +263,15 @@ export const useAppStore = defineStore('app', () => {
   const showChannelList = ref(false)
   const showSourceManager = ref(false)
   const showLivesPanel = ref(false)
+  const showYspPanel = ref(false)
   const externalPlayInfo = ref<{ url: string; headers: Record<string, string>; format: string; title: string } | null>(null)
   const pendingSniffUrl = ref<{ url: string; format: string; name: string } | null>(null)
   const showDlna = ref(false)
   const showSettings = ref(false)
   const localChannelsData = ref<LocalChannelsData>({ lives: [] })
+  const yspChannels = ref<YspChannelItem[]>([])
+  const yspWebviewUrl = ref<string>('')
+  const yspWebviewTitle = ref<string>('')
   const showLocalChannelsList = ref(false)
   const activeLocalLiveChannelIndex = ref(-1)
   const decodeMode = ref<DecodeMode>(loadDecodeMode())
@@ -396,6 +400,8 @@ function _doPersistSourceStats(): void {
     currentLocalVideo.value = null
     activeLocalLiveChannelIndex.value = -1
     activePlayMode.value = 'sniffer'
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
   }
 
   function clearExternalPlay(): void {
@@ -698,6 +704,8 @@ function _doPersistSourceStats(): void {
     currentLocalVideo.value = null
     activeLocalLiveChannelIndex.value = -1
     activePlayMode.value = 'channel'
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
     if (currentChannel.value && currentChannel.value !== channel) {
       saveChannelSourceIndex(currentChannel.value.channelName, currentChannel.value.sourceIndex)
     }
@@ -782,6 +790,8 @@ function _doPersistSourceStats(): void {
     const url = filePathToUrl(video.filePath)
     externalPlayInfo.value = { url, headers: EMPTY_HEADERS, format: '', title: video.name }
     activePlayMode.value = 'local'
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
   }
 
   function setLocalPlayMode(mode: PlayMode): void {
@@ -853,6 +863,23 @@ function _doPersistSourceStats(): void {
   }
 
   // ========== 本地直播源列表 ==========
+  function sortLocalChannelLives(lives: LocalChannel[]): LocalChannel[] {
+    const cctv = lives.filter(c => c.name.startsWith('CCTV'))
+    const weis = lives.filter(c => !c.name.startsWith('CCTV'))
+
+    cctv.sort((a, b) => {
+      const na = parseInt(a.name.replace(/^CCTV/, '').replace(/\+$/, ''))
+      const nb = parseInt(b.name.replace(/^CCTV/, '').replace(/\+$/, ''))
+      if (na !== nb) return na - nb
+      if (a.name.endsWith('+') && !b.name.endsWith('+')) return 1
+      if (!a.name.endsWith('+') && b.name.endsWith('+')) return -1
+      return 0
+    })
+
+    weis.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+    return [...cctv, ...weis]
+  }
+
   async function loadLocalChannels(): Promise<void> {
     logger.debug('loadLocalChannels: loading verified_channels.json')
     try {
@@ -860,6 +887,7 @@ function _doPersistSourceStats(): void {
         const data = await window.electronAPI.readLocalChannels()
         if (data && Array.isArray(data.lives)) {
           logger.log(`loadLocalChannels: loaded ${data.lives.length} channels`)
+          data.lives = sortLocalChannelLives(data.lives)
           localChannelsData.value = data as LocalChannelsData
         } else {
           logger.warn('loadLocalChannels: received invalid data structure', data)
@@ -876,7 +904,9 @@ function _doPersistSourceStats(): void {
     logger.debug('saveLocalChannels: writing verified_channels.json')
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.writeLocalChannels) {
-        const ok = await window.electronAPI.writeLocalChannels(localChannelsData.value)
+        localChannelsData.value.lives = sortLocalChannelLives(localChannelsData.value.lives)
+        const plainData = JSON.parse(JSON.stringify(localChannelsData.value))
+        const ok = await window.electronAPI.writeLocalChannels(plainData)
         if (ok) {
           logger.log(`saveLocalChannels: saved ${localChannelsData.value.lives.length} channels`)
         } else {
@@ -888,6 +918,57 @@ function _doPersistSourceStats(): void {
       return false
     } catch (e) {
       logger.error('saveLocalChannels failed:', e)
+      return false
+    }
+  }
+
+  async function loadYspChannels(): Promise<void> {
+    logger.debug('[YSP] loadYspChannels: starting...')
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI?.readYspChannels) {
+        const data = await window.electronAPI.readYspChannels()
+        if (data && Array.isArray(data.channels)) {
+          yspChannels.value = data.channels
+          logger.info(`[YSP] loaded ${data.channels.length} channels from ysp_channels.json`)
+          if (data.channels.length > 0) {
+            data.channels.forEach((c: any, i: number) => logger.debug(`[YSP]   [${i}] name="${c.name}" url="${(c.url||'').substring(0, 60)}"`))
+          }
+        } else {
+          logger.warn('[YSP] loadYspChannels: invalid data structure', data)
+        }
+      } else {
+        logger.warn('[YSP] loadYspChannels: electronAPI not available')
+      }
+    } catch (e) {
+      logger.error('[YSP] loadYspChannels failed:', e)
+    }
+  }
+
+  async function saveYspChannels(): Promise<boolean> {
+    const count = yspChannels.value.length
+    logger.debug(`[YSP] saveYspChannels: writing ${count} channels to file...`)
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI?.writeYspChannels) {
+        // 手动提取纯值，100% 剥离 Vue Proxy，结构化克隆无法序列化 Proxy 对象
+        const plainChannels = yspChannels.value.map((c: any) => ({
+          name: String(c.name || ''),
+          url: String(c.url || ''),
+          pid: String(c.pid || ''),
+        }))
+        const payload = { channels: plainChannels }
+        logger.debug(`[YSP] saveYspChannels: plainData channels=${plainChannels.length} first="${plainChannels[0]?.name}"`)
+        const ok = await window.electronAPI.writeYspChannels(payload)
+        if (ok) {
+          logger.info(`[YSP] saveYspChannels: wrote ${count} channels successfully`)
+        } else {
+          logger.error(`[YSP] saveYspChannels: write returned false for ${count} channels`)
+        }
+        return ok
+      }
+      logger.warn('[YSP] saveYspChannels: electronAPI not available')
+      return false
+    } catch (e) {
+      logger.error('[YSP] saveYspChannels failed:', e)
       return false
     }
   }
@@ -912,6 +993,8 @@ function _doPersistSourceStats(): void {
     localLiveChannelSourceIndex.value = 0
     activeLocalLiveChannelIndex.value = index
     activePlayMode.value = 'locallive'
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
   }
 
   function playNextLocalLiveChannel(): void {
@@ -975,6 +1058,7 @@ function _doPersistSourceStats(): void {
     channelList:     { key: 'c',        ctrl: false, shift: false, alt: false, meta: false },
     localVideo:      { key: 'v',        ctrl: false, shift: false, alt: false, meta: false },
     localChannels:   { key: 'k',        ctrl: false, shift: false, alt: false, meta: false },
+    yspPanel:        { key: 'o',        ctrl: false, shift: false, alt: false, meta: false },
     livesPanel:      { key: 'l',        ctrl: false, shift: false, alt: false, meta: false },
     sourceManager:   { key: 's',        ctrl: true,  shift: true,  alt: false, meta: false },
     toolsDialog:     { key: 'x',        ctrl: true,  shift: true,  alt: false, meta: false },
@@ -982,15 +1066,18 @@ function _doPersistSourceStats(): void {
     settings:        { key: ',',        ctrl: true,  shift: false, alt: false, meta: false },
     refreshSource:   { key: 'F5',       ctrl: false, shift: false, alt: false, meta: false },
     fullscreen:      { key: 'F11',      ctrl: false, shift: false, alt: false, meta: false },
-    prevChannel:     { key: 'ArrowUp',  ctrl: false, shift: false, alt: false, meta: false },
-    nextChannel:     { key: 'ArrowDown',ctrl: false, shift: false, alt: false, meta: false },
-    escape:          { key: 'Escape',   ctrl: false, shift: false, alt: false, meta: false },
+    prevChannel:     { key: 'ArrowUp',   ctrl: false, shift: false, alt: false, meta: false },
+    nextChannel:     { key: 'ArrowDown', ctrl: false, shift: false, alt: false, meta: false },
+    prevSource:      { key: 'ArrowLeft', ctrl: false, shift: false, alt: false, meta: false },
+    nextSource:      { key: 'ArrowRight',ctrl: false, shift: false, alt: false, meta: false },
+    escape:          { key: 'Escape',    ctrl: false, shift: false, alt: false, meta: false },
   }
 
   const SHORTCUT_NAMES: Record<string, string> = {
     channelList:     '频道列表',
     localVideo:      '本地视频列表',
     localChannels:   '本地直播源',
+    yspPanel:        '官网直播源',
     livesPanel:      '直播节目',
     sourceManager:   '直播源管理',
     toolsDialog:     '工具箱',
@@ -998,6 +1085,8 @@ function _doPersistSourceStats(): void {
     settings:        '设置',
     refreshSource:   '刷新当前源',
     fullscreen:      '全屏',
+    prevSource:      '上一线路',
+    nextSource:      '下一线路',
     prevChannel:     '上一个频道',
     nextChannel:     '下一个频道',
     escape:          '关闭所有面板',
@@ -1136,6 +1225,7 @@ function _doPersistSourceStats(): void {
     showChannelList,
     showSourceManager,
     showLivesPanel,
+    showYspPanel,
     externalPlayInfo,
     pendingSniffUrl,
     showDlna,
@@ -1187,6 +1277,11 @@ function _doPersistSourceStats(): void {
     clearLocalLiveChannel,
     switchLocalLiveNextSource,
     switchLocalLivePrevSource,
+    yspChannels,
+    loadYspChannels,
+    saveYspChannels,
+    yspWebviewUrl,
+    yspWebviewTitle,
     // 快捷键
     shortcuts,
     matchShortcut,

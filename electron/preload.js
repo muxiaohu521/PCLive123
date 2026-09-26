@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sniffUrl: (pageUrl) => ipcRenderer.invoke('sniff-url', pageUrl),
   resolvePlayUrl: (siteMeta) => ipcRenderer.invoke('resolve-external-play-url', siteMeta),
 
+  // 央视频 (yangshipin.cn) —— 提取官方频道链接
+  yspExtractChannels: () => ipcRenderer.invoke('ysp-extract-channels'),
+
   createFloatWindow: (videoInfo) => ipcRenderer.invoke('create-float-window', videoInfo),
   floatWindowUpdate: (videoInfo) => ipcRenderer.invoke('float-window-update', videoInfo),
   closeFloatWindow: () => ipcRenderer.invoke('close-float-window'),
@@ -86,4 +89,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   readLocalChannels: () => ipcRenderer.invoke('local-channels:read'),
   writeLocalChannels: (data) => ipcRenderer.invoke('local-channels:write', data),
+
+  // 央视频频道列表持久化
+  readYspChannels: () => ipcRenderer.invoke('ysp-channels:read'),
+  writeYspChannels: (data) => ipcRenderer.invoke('ysp-channels:write', data),
+  openYspChannelsFile: () => ipcRenderer.invoke('ysp-channels:openFile'),
+  getYspChannelsPath: () => ipcRenderer.invoke('ysp-channels:getPath'),
 })

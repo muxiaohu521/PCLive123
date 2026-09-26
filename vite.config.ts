@@ -8,14 +8,20 @@ import { URL } from 'url'
 
 export default defineConfig({
   plugins: [
-    vue(),
+    vue({
+      template: {
+        compilerOptions: {
+          isCustomElement: (tag) => tag === 'webview'
+        }
+      }
+    }),
     {
       name: 'serve-sources-json',
       configureServer(server) {
         // Serve sources.json
         server.middlewares.use((req, res, next) => {
           if (req.url === '/sources.json') {
-            const filePath = resolve(__dirname, 'sources.json')
+            const filePath = resolve(__dirname, 'data', 'sources.json')
             try {
               const content = fs.readFileSync(filePath, 'utf-8')
               res.setHeader('Content-Type', 'application/json; charset=utf-8')

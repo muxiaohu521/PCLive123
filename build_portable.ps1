@@ -391,22 +391,16 @@ $electronDst = Join-Path $appDir "electron"
 Copy-Item $electronSrcDir -Destination $electronDst -Recurse -Force
 Write-Host "  Copied: electron/" -ForegroundColor Gray
 
-# --- 5c. 复制 sources.json (外置直播源) ---
-$sourcesFile = Join-Path $scriptDir "sources.json"
-if (Test-Path $sourcesFile) {
-    Copy-Item $sourcesFile -Destination $OutputDir -Force
-    Write-Host "  Copied: sources.json" -ForegroundColor Gray
+# --- 5c. 复制 data/ 数据目录（sources.json, verified_channels.json, ysp_channels.json, cache/） ---
+$dataDir = Join-Path $scriptDir "data"
+if (Test-Path $dataDir) {
+    $dataDest = Join-Path $OutputDir "data"
+    Copy-Item $dataDir -Destination $dataDest -Recurse -Force
+    Write-Host "  Copied: data/ (sources, verified_channels, ysp_channels, cache)" -ForegroundColor Gray
 } else {
-    Write-Host "  WARNING: sources.json not found, app will launch with empty source list" -ForegroundColor Yellow
-}
-
-# --- 5c2. 复制 verified_channels.json (本地直播源频道) ---
-$verifiedChannelsFile = Join-Path $scriptDir "verified_channels.json"
-if (Test-Path $verifiedChannelsFile) {
-    Copy-Item $verifiedChannelsFile -Destination $OutputDir -Force
-    Write-Host "  Copied: verified_channels.json" -ForegroundColor Gray
-} else {
-    Write-Host "  WARNING: verified_channels.json not found, local channels will start empty" -ForegroundColor Yellow
+    Write-Host "  WARNING: data/ not found, creating empty data directory" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path (Join-Path $OutputDir "data") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $OutputDir "data" "cache") -Force | Out-Null
 }
 
 # --- 5d. 复制 package.json (只保留必要字段) ---

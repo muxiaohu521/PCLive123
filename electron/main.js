@@ -1,7 +1,7 @@
 const dns = require('dns')
 dns.setDefaultResultOrder('ipv4first')
 
-const { app, BrowserWindow, ipcMain, dialog, session, net } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, session, net, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -10,6 +10,7 @@ const { URL } = require('url')
 const zlib = require('zlib')
 const dlna = require('./dlna')
 const sniffer = require('./sniffer')
+const yspHandler = require('./ysp_handler')
 const os = require('os')
 const { purifyM3u8Playlist } = require('./m3u8Purifier')
 
@@ -182,8 +183,8 @@ function extractSetCookieHeaders(headers) {
 }
 
 const sourcesFilePath = app.isPackaged
-  ? path.join(path.dirname(app.getPath('exe')), 'sources.json')
-  : path.join(__dirname, '..', 'sources.json')
+  ? path.join(path.dirname(app.getPath('exe')), 'data', 'sources.json')
+  : path.join(__dirname, '..', 'data', 'sources.json')
 
 function ensureSourcesFile() {
   try {
@@ -252,6 +253,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webviewTag: true,
       webSecurity: false  // Required: renderer loads file:// URLs for local video & fetch() for HLS.js/mpegts.js cross-origin playback
     }
   })
@@ -1790,8 +1792,8 @@ app.whenReady().then(() => {
 
   // --- Channel Cache (直播源解析缓存，每个源独立JSON文件，按源名称命名) ---
   const channelCacheDir = app.isPackaged
-    ? path.join(path.dirname(app.getPath('exe')), 'cache')
-    : path.join(__dirname, '..', 'cache')
+    ? path.join(path.dirname(app.getPath('exe')), 'data', 'cache')
+    : path.join(__dirname, '..', 'data', 'cache')
   try { fs.mkdirSync(channelCacheDir, { recursive: true }) } catch (_) {}
 
   function safeCacheName(name) {
@@ -1861,8 +1863,8 @@ app.whenReady().then(() => {
   // --- Local Channels (本地直播源 verified_channels.json) ---
   // 与 sources.json 一致：EXE 旁边（便携版）/ 项目根目录（开发版），Vite 零干扰
   const localChannelsPath = app.isPackaged
-    ? path.join(path.dirname(app.getPath('exe')), 'verified_channels.json')
-    : path.join(__dirname, '..', 'verified_channels.json')
+    ? path.join(path.dirname(app.getPath('exe')), 'data', 'verified_channels.json')
+    : path.join(__dirname, '..', 'data', 'verified_channels.json')
 
   // 旧路径（首次启动自动迁移）
   const legacyChannelsPaths = [
@@ -1905,6 +1907,73 @@ app.whenReady().then(() => {
       logError(`LOCAL-CHANNELS: write error: ${e.message}`)
       return false
     }
+  })
+
+  // --- 央视频频道列表 (ysp_channels.json) ---
+  const yspChannelsPath = app.isPackaged
+    ? path.join(path.dirname(app.getPath('exe')), 'data', 'ysp_channels.json')
+    : path.join(__dirname, '..', 'data', 'ysp_channels.json')
+
+  ipcMain.handle('ysp-channels:read', () => {
+    try {
+      logDebug(`YSP-CHANNELS: read requested, path=${yspChannelsPath}`)
+      const dir = path.dirname(yspChannelsPath)
+      if (!fs.existsSync(dir)) {
+        logDebug(`YSP-CHANNELS: read creating dir ${dir}`)
+        fs.mkdirSync(dir, { recursive: true })
+      }
+      if (fs.existsSync(yspChannelsPath)) {
+        const raw = fs.readFileSync(yspChannelsPath, 'utf8')
+        logDebug(`YSP-CHANNELS: read file raw length=${raw.length}`)
+        const data = JSON.parse(raw)
+        logInfo(`YSP-CHANNELS: read ${Array.isArray(data?.channels) ? data.channels.length : 0} channels from ${yspChannelsPath}`)
+        return data
+      }
+      logDebug('YSP-CHANNELS: file not found, returning empty')
+      return { channels: [] }
+    } catch (e) {
+      logError(`YSP-CHANNELS: read error: ${e.message}`)
+      return { channels: [], error: e.message }
+    }
+  })
+
+  ipcMain.handle('ysp-channels:write', (_event, data) => {
+    try {
+      logDebug(`YSP-CHANNELS: write received data type=${typeof data} keys=${Object.keys(data||{}).join(',')}`)
+      const chanCount = Array.isArray(data?.channels) ? data.channels.length : -1
+      logDebug(`YSP-CHANNELS: write channels count=${chanCount} path=${yspChannelsPath}`)
+      if (chanCount > 0) {
+        data.channels.forEach((c, i) => logDebug(`YSP-CHANNELS:   [${i}] name="${c?.name}" url="${(c?.url||'').substring(0,60)}"`))
+      }
+      const dir = path.dirname(yspChannelsPath)
+      if (!fs.existsSync(dir)) {
+        logDebug(`YSP-CHANNELS: creating dir ${dir}`)
+        fs.mkdirSync(dir, { recursive: true })
+      }
+      const json = JSON.stringify(data, null, 2)
+      logDebug(`YSP-CHANNELS: json length=${json.length}`)
+      fs.writeFileSync(yspChannelsPath, json, 'utf8')
+      logInfo(`YSP-CHANNELS: wrote ${chanCount} channels => ${yspChannelsPath}`)
+      return true
+    } catch (e) {
+      logError(`YSP-CHANNELS: write error: ${e.message} stack=${e.stack}`)
+      return false
+    }
+  })
+
+  ipcMain.handle('ysp-channels:openFile', () => {
+    try {
+      shell.showItemInFolder(yspChannelsPath)
+      logInfo('YSP-CHANNELS: opened file location')
+      return true
+    } catch (e) {
+      logError(`YSP-CHANNELS: openFile error: ${e.message}`)
+      return false
+    }
+  })
+
+  ipcMain.handle('ysp-channels:getPath', () => {
+    return yspChannelsPath
   })
 
   // --- Networking Config IPC ---
@@ -2618,6 +2687,19 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
     return { success: true, urls: results, totalFound: seenUrls.size, phase }
   })
 })
+
+  // ============ 央视频 (yangshipin.cn) 频道列表提取 ============
+  ipcMain.handle('ysp-extract-channels', async () => {
+    logDebug('IPC ysp-extract-channels: 正在提取央视频频道链接')
+    try {
+      const result = await yspHandler.extractYangshipinChannels()
+      logInfo(`YSP: 提取到 ${result.count || 0} 个频道`)
+      return result
+    } catch (e) {
+      logError('YSP: extract error: ' + e.message)
+      return { success: false, channels: [], message: e.message }
+    }
+  })
 
   // ============ FFmpeg IPC handlers ============
   const { spawn, execFile } = require('child_process')
