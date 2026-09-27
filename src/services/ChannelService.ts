@@ -1,14 +1,13 @@
 import { parseToJsonArray, safeStr, stripJsonComments, isJson, detectAndDecode } from '@/utils/TxtParser'
 import { createChannel, buildChannelGroup } from '@/models/LiveChannelItem'
-import { APP_CONFIG } from '@/constants'
+import { APP_CONFIG, isElectron } from '@/constants'
 import { logger } from '@/utils/logger'
 import { isAdChannelName } from '@/utils/AdFilter'
 import { crawlSourceUrlsFromHtml } from '@/utils/SourceCrawler'
-import type { LiveChannelGroup, LiveSourceGroup, LiveChannelItem } from '@/models/LiveChannelItem'
+import type { LiveChannelGroup, LiveSourceGroup, LiveChannelItem, CacheStorageEntry } from '@/models/LiveChannelItem'
 import type { Ref } from 'vue'
 
 
-const MAX_REDIRECTS = APP_CONFIG.MAX_REDIRECTS
 const FETCH_TIMEOUT = APP_CONFIG.FETCH_TIMEOUT
 
 function stripBackticks(s: string): string {
@@ -70,8 +69,8 @@ async function aesCbcDecrypt(keyBytes: Uint8Array, ivBytes: Uint8Array, data: Ui
 
 async function aesEcbDecrypt(keyBytes: Uint8Array, data: Uint8Array): Promise<string | null> {
   try {
-    const cryptoKey = await crypto.subtle.importKey('raw', keyBytes as globalThis.BufferSource, { name: 'AES-ECB' as any }, false, ['decrypt'] as any)
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-ECB' as any } as any, cryptoKey, data as globalThis.BufferSource)
+    const cryptoKey = await crypto.subtle.importKey('raw', keyBytes as globalThis.BufferSource, { name: 'AES-ECB' } as AesKeyAlgorithm, false, ['decrypt'])
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-ECB' } as AesCbcParams, cryptoKey, data as globalThis.BufferSource)
     return new TextDecoder('utf-8').decode(decrypted)
   } catch {
     return null
@@ -150,7 +149,7 @@ async function FindResult(rawContent: string, configKey?: string): Promise<strin
         let decoded: string | null = null
         if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
           try {
-            const stream = new Response(bytes as any).body!.pipeThrough(new DecompressionStream('gzip'))
+            const stream = new Response(bytes as unknown as BodyInit).body!.pipeThrough(new DecompressionStream('gzip'))
             decoded = await new Response(stream).text()
             logger.log('[FindResult] Base64 + gzip decompressed, length:', decoded.length)
           } catch {
@@ -530,7 +529,7 @@ function parseLiveData(text: string): LiveChannelGroup[] {
   const groups = parseToJsonArray(text)
   let channelNum = 0
   return groups.map((g: Record<string, unknown>) => {
-    const rawChannels = (g.channels as any[]) || []
+    const rawChannels = (g.channels as unknown[]) || []
     const liveChannels = rawChannels
       .filter((raw: any) => !isAdChannelName(raw.name || raw.title || ''))
       .map((raw: any) => {
@@ -953,17 +952,10 @@ let seenUrlInsertOrder: string[] = []
 
 const FLUSH_THROTTLE_MS = 500
 
-export interface CacheStorageEntry {
-  data: LiveChannelGroup[]
-  livesGroups: LiveSourceGroup[]
-  time: number
-  completedCount: number
-}
-
 function hasChannelCacheAPI(): boolean {
-  return typeof window !== 'undefined' && window.electronAPI !== undefined
-    && typeof window.electronAPI.getChannelCacheEntry === 'function'
-    && typeof window.electronAPI.setChannelCacheEntry === 'function'
+  return isElectron()
+    && typeof window.electronAPI!.getChannelCacheEntry === 'function'
+    && typeof window.electronAPI!.setChannelCacheEntry === 'function'
 }
 
 export async function readCacheEntry(url: string): Promise<CacheStorageEntry | null> {

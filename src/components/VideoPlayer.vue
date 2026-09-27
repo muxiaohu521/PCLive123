@@ -131,13 +131,13 @@ let lastAudioVolume = 0.8
 let lastAudioMuted = false
 
 // FFmpeg 状态（duration/seek 补丁）
-let _ffmpegDurationPatched = 0
+
 let _ffmpegDurationCleanup: (() => void) | null = null
 let _ffmpegSeekOffset = 0
 let _ffmpegSeekCleanup: (() => void) | null = null
 let _ffmpegCurrentTimeCleanup: (() => void) | null = null
 let _ffmpegSeeking = false
-let _ffmpegLastSeekUrl = ''
+
 let _ffmpegSuppressNextSeek = false
 let _ffmpegSuppressSeekTimer: ReturnType<typeof setTimeout> | null = null
 let _ffmpegUserSeekTarget = 0
@@ -156,7 +156,6 @@ function cleanupFfmpegPatches(): void {
     _ffmpegDurationCleanup()
     _ffmpegDurationCleanup = null
   }
-  _ffmpegDurationPatched = 0
   if (_ffmpegCurrentTimeCleanup) {
     _ffmpegCurrentTimeCleanup()
     _ffmpegCurrentTimeCleanup = null
@@ -177,7 +176,6 @@ function cleanupFfmpegSeek(): void {
   }
   _ffmpegSeekOffset = 0
   _ffmpegSeeking = false
-  _ffmpegLastSeekUrl = ''
   _ffmpegSuppressNextSeek = false
   _ffmpegUserSeekTarget = 0
   if (_ffmpegSuppressSeekTimer) {
@@ -261,6 +259,7 @@ function updateControlLabels(): void {
   setDisp('source-info', mode === 'channel' || mode === 'locallive')
   setDisp('next-source', mode === 'channel' || mode === 'locallive')
   setDisp('play-mode', mode === 'local')
+  setDisp('subtitle-cc', mode !== 'channel' && mode !== 'locallive')
 
   if (mode === 'local') {
     const pc = art.controls['prev-channel'] as HTMLElement | undefined; if (pc) pc.setAttribute('title', '上一视频')
@@ -482,6 +481,28 @@ function disposeFlv(video: HTMLVideoElement | null): void {
     clearTimeout(_mpegtsWatchdog)
     _mpegtsWatchdog = null
   }
+}
+
+function attachHls(
+  video: HTMLVideoElement,
+  hls: Hls,
+  onError: (data: { type: string; details: string; fatal: boolean }) => void,
+  onManifestParsed?: () => void,
+): void {
+  hls.on(Hls.Events.ERROR, (_event, data) => { onError(data) })
+  if (onManifestParsed) {
+    hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed)
+  }
+  hls.attachMedia(video)
+  ;(video as any).hls = hls
+  const onHlsEnded = () => {
+    hls.stopLoad()
+    hls.destroy()
+    ;(video as any).hls = null
+    ;(video as any)._hlsEndedHandler = null
+  }
+  ;(video as any)._hlsEndedHandler = onHlsEnded
+  video.addEventListener('ended', onHlsEnded, { once: true })
 }
 
 function disposeAudioPlayer(): void {
@@ -863,7 +884,7 @@ async function playLocalSoftware(url: string, genId: number, allowFfmpegFallback
     const playUrl = httpUrl || url
     if (Hls.isSupported()) {
       const hls = new Hls()
-      hls.on(Hls.Events.ERROR, (_event, data) => {
+      attachHls(video, hls, (data) => {
         logger.warn('[VideoPlayer] software HLS local error:', data.type, data.details)
         if (data.fatal) {
           logger.warn('[VideoPlayer] software mode: local HLS fatal, destroying instance')
@@ -872,16 +893,6 @@ async function playLocalSoftware(url: string, genId: number, allowFfmpegFallback
         }
       })
       hls.loadSource(playUrl)
-      hls.attachMedia(video)
-      ;(video as any).hls = hls
-      const onHlsEnded = () => {
-        hls.stopLoad()
-        hls.destroy()
-        ;(video as any).hls = null
-        ;(video as any)._hlsEndedHandler = null
-      }
-      ;(video as any)._hlsEndedHandler = onHlsEnded
-      video.addEventListener('ended', onHlsEnded, { once: true })
       video.play().catch(() => {})
     } else {
       logger.warn('[VideoPlayer] software: Hls.js not available, cannot play m3u8 in software mode')
@@ -922,13 +933,9 @@ async function playLocalFfmpeg(url: string, genId: number, seekTime?: number): P
       currentFormat = 'mp4'
       const effectiveSeek = (typeof seekTime === 'number' && seekTime > 0) ? seekTime : _ffmpegSeekOffset
       _ffmpegSeekOffset = effectiveSeek
-      _ffmpegLastSeekUrl = url
       if (result.duration && result.duration > 0) {
         logger.info('[VideoPlayer] FFmpeg probed duration:', result.duration.toFixed(1), 's')
-        _ffmpegDurationPatched = result.duration
         patchVideoDuration(video, result.duration)
-      } else {
-        _ffmpegDurationPatched = 0
       }
       if (effectiveSeek > 0) {
         _ffmpegCurrentTimeCleanup = patchVideoCurrentTime(video, effectiveSeek)
@@ -1259,7 +1266,7 @@ async function createPlayer(): Promise<void> {
                 }
               },
             })
-            hls.on(Hls.Events.ERROR, (_event, data) => {
+            attachHls(video, hls, (data) => {
               logger.warn('[VideoPlayer] software HLS error:', data.type, data.details, 'fatal:', data.fatal)
               if (data.fatal) {
                 logger.warn('[VideoPlayer] software mode: HLS fatal, software mode forbids FFmpeg fallback — destroying instance')
@@ -1270,21 +1277,8 @@ async function createPlayer(): Promise<void> {
                 logger.warn('[VideoPlayer] software mode: MediaSource 需要重置，尝试恢复...')
                 try { hls.recoverMediaError() } catch (_) { /* 恢复失败则等待下次重试 */ }
               }
-            })
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              clearSourceTimeout()
-            })
+            }, () => { clearSourceTimeout() })
             hls.loadSource(url)
-            hls.attachMedia(video)
-            ;(video as any).hls = hls
-            const onHlsEnded = () => {
-              hls.stopLoad()
-              hls.destroy()
-              ;(video as any).hls = null
-              ;(video as any)._hlsEndedHandler = null
-            }
-            ;(video as any)._hlsEndedHandler = onHlsEnded
-            video.addEventListener('ended', onHlsEnded, { once: true })
           } else {
             logger.warn('[VideoPlayer] software mode: hls.js not supported, software mode forbids FFmpeg fallback — cannot play m3u8')
           }
@@ -1309,7 +1303,7 @@ async function createPlayer(): Promise<void> {
               }
             },
           })
-          hls.on(Hls.Events.ERROR, (_event, data) => {
+          attachHls(video, hls, (data) => {
             logger.warn('[VideoPlayer] auto HLS error:', data.type, data.details, 'fatal:', data.fatal)
             if (data.fatal) {
               logger.warn('[VideoPlayer] auto: 软解HLS致命错误, 回退 FFmpeg')
@@ -1321,21 +1315,8 @@ async function createPlayer(): Promise<void> {
               logger.warn('[VideoPlayer] auto: MediaSource 需要重置，尝试恢复...')
               try { hls.recoverMediaError() } catch (_) { /* 恢复失败则等待下次重试 */ }
             }
-          })
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            clearSourceTimeout()
-          })
+          }, () => { clearSourceTimeout() })
           hls.loadSource(url)
-          hls.attachMedia(video)
-          ;(video as any).hls = hls
-          const onHlsEnded = () => {
-            hls.stopLoad()
-            hls.destroy()
-            ;(video as any).hls = null
-            ;(video as any)._hlsEndedHandler = null
-          }
-          ;(video as any)._hlsEndedHandler = onHlsEnded
-          video.addEventListener('ended', onHlsEnded, { once: true })
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = url
         }
@@ -1809,7 +1790,6 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
 
   // ── 格式检测与路由 ──
   let finalUrl = url
-  let realSourceUrl = finalUrl
   const lowerPath = finalUrl.split('?')[0].split('#')[0].toLowerCase()
   let finalFormat: string
 
@@ -1826,7 +1806,6 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     finalFormat = confirmedFormat
     if (!externalPlay) {
       try {
-        realSourceUrl = finalUrl
         await closeCurrentSession()
         const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat)
         if (genId !== loadGenerationId) return
@@ -1881,7 +1860,6 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
 
     if (!sessionManager.currentProxySessionId && !externalPlay && !hasFormatExt) {
       try {
-        realSourceUrl = finalUrl
         await closeCurrentSession()
         const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat)
         if (genId !== loadGenerationId) return

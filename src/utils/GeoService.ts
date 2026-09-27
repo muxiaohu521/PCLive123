@@ -12,9 +12,27 @@ export interface GeoInfo {
 const CACHE: Map<string, { data: GeoInfo; ts: number }> = new Map()
 const CACHE_TTL = 30 * 60 * 1000
 
-function extractHost(url: string): string {
+export function extractHost(input: string): string {
+  if (!input || !input.trim()) return ''
+
+  const trimmed = input.trim()
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      return new URL(trimmed).hostname
+    } catch {
+      return ''
+    }
+  }
+
+  const hostMatch = trimmed.match(/^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/)
+  if (hostMatch) return trimmed
+
+  const ipMatch = trimmed.match(/^(\d{1,3}\.){3}\d{1,3}$/)
+  if (ipMatch) return trimmed
+
   try {
-    const u = new URL(url)
+    const u = new URL('http://' + trimmed)
     return u.hostname
   } catch {
     return ''
@@ -45,14 +63,22 @@ export async function getGeoInfo(url: string): Promise<GeoInfo | null> {
 }
 
 export async function getGeoInfoBatch(urls: string[]): Promise<Map<string, GeoInfo>> {
-  const result = new Map<string, GeoInfo>()
+  const hostToGeo = new Map<string, GeoInfo>()
   const uniqueHosts = [...new Set(urls.map(extractHost).filter(Boolean))]
 
   const promises = uniqueHosts.map(async (host) => {
     const info = await getGeoInfo('http://' + host)
-    if (info) result.set(host, info)
+    if (info) hostToGeo.set(host, info)
   })
 
   await Promise.allSettled(promises)
+
+  const result = new Map<string, GeoInfo>()
+  for (const url of urls) {
+    const host = extractHost(url)
+    if (host && hostToGeo.has(host)) {
+      result.set(url, hostToGeo.get(host)!)
+    }
+  }
   return result
 }

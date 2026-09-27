@@ -74,7 +74,7 @@ const props = defineProps<{
   manualPlayState: number
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   prevChannel: []
   nextChannel: []
   togglePlay: []
@@ -112,7 +112,7 @@ function exec(code: string): void {
   const wv = props.webviewEl
   if (!wv) return
   try {
-    ;(wv as any).executeJavaScript?.(code)
+    (wv as HTMLElement & { executeJavaScript?: (code: string) => void }).executeJavaScript?.(code)
   } catch (_) {}
 }
 

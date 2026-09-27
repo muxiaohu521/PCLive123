@@ -11,6 +11,16 @@ export const STORAGE_KEYS = {
   SHORTCUTS: 'pclive_shortcuts',
 } as const
 
+export function isElectron(): boolean {
+  return typeof window !== 'undefined' && window.electronAPI !== undefined
+}
+
+export function hasElectronAPI(): boolean {
+  return typeof window !== 'undefined' && window.electronAPI !== undefined
+    && typeof window.electronAPI.getSources === 'function'
+    && typeof window.electronAPI.saveSources === 'function'
+}
+
 export const SUPPORTED_VIDEO_EXTENSIONS = [
   '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv',
   '.webm', '.m4v', '.ts', '.mts', '.m2ts', '.ogv',

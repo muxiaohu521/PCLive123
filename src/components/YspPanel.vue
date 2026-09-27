@@ -63,6 +63,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Close, FolderOpened, Edit, Delete } from '@element-plus/icons-vue'
 import { useAppStore } from '@/store'
 import { logger } from '@/utils/logger'
+import { isElectron as checkIsElectron } from '@/constants'
 
 defineEmits<{ close: [] }>()
 
@@ -72,7 +73,7 @@ const dialogVisible = ref(false)
 const editingIndex = ref(-1)
 const form = reactive({ name: '', url: '' })
 
-const isElectron = computed(() => !!(window as any).electronAPI)
+const isElectron = computed(() => checkIsElectron())
 
 function openAddDialog() {
   editingIndex.value = -1
@@ -156,17 +157,17 @@ function playChannel(ch: { name: string; url: string }) {
   }
   logger.info(`[YSPanel] playChannel: opening webview name="${ch.name}" url="${ch.url.substring(0, 80)}"`)
   // 清除其他播放模式的状态，确保 TitleBar 正确显示"官网直播源"标签
-  store.currentChannel = null as any
-  store.currentLocalVideo = null as any
+  store.currentChannel = null
+  store.currentLocalVideo = null
   store.externalPlayInfo = null
   store.activeLocalLiveChannelIndex = -1
-  store.activePlayMode = null as any
+  store.activePlayMode = null
   store.yspWebviewUrl = ch.url
   store.yspWebviewTitle = ch.name
 }
 
 async function openFileLocation() {
-  const api = (window as any).electronAPI
+  const api = window.electronAPI
   if (!api?.openYspChannelsFile) {
     logger.warn('[YSPanel] openFileLocation: electronAPI not available')
     ElMessage.warning('仅 Electron 环境支持')

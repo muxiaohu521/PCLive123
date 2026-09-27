@@ -120,3 +120,10 @@ export function getChannelHeaders(item: LiveChannelItem): Record<string, string>
   if (item.channelReferer) h['Referer'] = item.channelReferer
   return h
 }
+
+export interface CacheStorageEntry {
+  data: LiveChannelGroup[]
+  livesGroups: LiveSourceGroup[]
+  time: number
+  completedCount: number
+}

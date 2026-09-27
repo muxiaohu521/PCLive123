@@ -21,7 +21,7 @@
     </div>
 
     <template v-if="!searchText">
-      <div class="subline-tabs" ref="sublineTabsRef">
+      <div class="subline-tabs">
         <div
           v-for="(sl, si) in subLineGroups"
           :key="'sl-' + si"
@@ -151,7 +151,6 @@ defineEmits<{
 const store = useAppStore()
 const bodyRef = ref<HTMLElement | null>(null)
 const tabsRef = ref<HTMLElement | null>(null)
-const sublineTabsRef = ref<HTMLElement | null>(null)
 const searchText = ref('')
 const activeSubLine = ref(0)
 const activeCategory = ref(0)
@@ -599,16 +598,27 @@ function updateActiveSelection() {
 }
 
 .panel-body::-webkit-scrollbar {
-  width: 4px;
+  width: 8px;
 }
 
 .panel-body::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1a1a2e;
+  border-radius: 4px;
 }
 
 .panel-body::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 2px;
+  background: #4a4a6a;
+  border-radius: 4px;
+  border: 2px solid #1a1a2e;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8a;
+}
+
+.panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a6a #1a1a2e;
 }
 
 .channel-item {

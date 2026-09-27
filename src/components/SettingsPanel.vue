@@ -1,253 +1,274 @@
 <template>
-  <div class="settings-panel">
-    <div class="panel-header">
-      <h3 class="panel-title">⚙ 设置</h3>
-      <button class="close-btn" @click="$emit('close')">✕</button>
-    </div>
-
-    <div class="panel-body">
-      <div class="section">
-        <h4 class="section-title">播放设置</h4>
-        <div class="setting-row">
-          <label>默认音量</label>
-          <input type="range" min="0" max="100" v-model.number="localVolume" class="slider" />
-          <span class="setting-value">{{ localVolume }}%</span>
-        </div>
-        <div class="setting-row">
-          <label>缓冲区大小</label>
-          <select v-model.number="localBufferSize" class="select">
-            <option :value="30">30 秒</option>
-            <option :value="60">60 秒</option>
-            <option :value="120">120 秒</option>
-            <option :value="300">300 秒</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>解码模式</label>
-          <select v-model="localDecodeMode" class="select">
-            <option
-              v-for="(label, mode) in DECODE_MODE_LABELS"
-              :key="mode"
-              :value="mode"
-            >{{ label }}</option>
-          </select>
-        </div>
-        <div class="setting-row vertical">
-          <label>FFmpeg 路径</label>
-          <div class="path-row">
-            <input
-              v-model="localFfmpegPath"
-              placeholder="例如 D:\\ffmpeg\\bin\\ffmpeg.exe"
-              class="input path-input"
-              :class="{ 'path-ok': ffmpegStatus === 'ok', 'path-fail': ffmpegStatus === 'fail' }"
-            />
-            <button class="mini-btn" @click="browseFfmpeg" title="浏览选择 ffmpeg 可执行文件">浏览</button>
-            <button class="mini-btn" @click="testFfmpeg" title="测试 ffmpeg 是否可用" :disabled="!localFfmpegPath || testRunning">
-              {{ testRunning ? '测试中...' : '测试' }}
-            </button>
+  <div v-if="store.showSettings" class="settings-root">
+    <el-dialog
+      :model-value="store.showSettings"
+      title=""
+      width="480px"
+      :modal="false"
+      :append-to-body="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      destroy-on-close
+      draggable
+      class="settings-dialog-root"
+      @update:model-value="(v: boolean) => store.showSettings = v"
+    >
+      <template #header>
+        <div class="dialog-custom-header">
+          <span class="dialog-title">⚙ 设置</span>
+          <div class="dialog-header-actions">
+            <el-button link size="small" @click="closeDialog" class="close-btn" title="关闭">
+              &#x2715;
+            </el-button>
           </div>
-          <span v-if="ffmpegStatus === 'ok'" class="path-status ok">✓ 检测到 {{ ffmpegVersion }}</span>
-          <span v-if="ffmpegStatus === 'fail'" class="path-status fail">✗ {{ ffmpegError }}</span>
         </div>
-      </div>
+      </template>
 
-      <div class="section">
-        <h4 class="section-title">字幕设置</h4>
-        <div class="setting-row">
-          <label>字幕字号</label>
-          <select v-model.number="localSubFontSize" class="select">
-            <option :value="12">小 (12px)</option>
-            <option :value="16">中 (16px)</option>
-            <option :value="20">大 (20px)</option>
-            <option :value="24">特大 (24px)</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>字幕颜色</label>
-          <select v-model="localSubColor" class="select">
-            <option value="#ffffff">白色</option>
-            <option value="#ffff00">黄色</option>
-            <option value="#00ff00">绿色</option>
-            <option value="#00bfff">蓝色</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>字幕背景</label>
-          <select v-model="localSubBg" class="select">
-            <option value="transparent">透明</option>
-            <option value="rgba(0,0,0,0.6)">半透明黑</option>
-            <option value="rgba(0,0,0,0.9)">深黑</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="section">
-        <h4 class="section-title">网络设置</h4>
-        <div class="setting-row">
-          <label>HTTP 代理</label>
-          <input v-model="localProxy" placeholder="http://127.0.0.1:7890" class="input" />
-        </div>
-        <div class="setting-row">
-          <label>请求超时 (秒)</label>
-          <input type="number" v-model.number="localTimeout" min="3" max="60" class="input-num" />
-        </div>
-      </div>
-
-      <div class="section">
-        <h4 class="section-title">广告过滤</h4>
-
-        <div class="adfilter-block">
-          <div class="block-title">
-            <span class="block-icon">&#x1F6AB;</span> 广告域名黑名单
-            <span class="block-count">{{ allAdHosts.length }} 个</span>
+      <div class="settings-content">
+        <div class="section">
+          <h4 class="section-title">播放设置</h4>
+          <div class="setting-row">
+            <label>默认音量</label>
+            <input type="range" min="0" max="100" v-model.number="localVolume" class="slider" />
+            <span class="setting-value">{{ localVolume }}%</span>
           </div>
-          <div class="block-desc">命中以下域名的请求将被拦截，不加载广告内容</div>
-          <div class="host-tags">
-            <span
-              v-for="host in allAdHosts"
-              :key="host"
-              class="host-tag"
-              :class="{ 'is-custom': extraAdHosts.includes(host) }"
-            >
-              {{ host }}
+          <div class="setting-row">
+            <label>缓冲区大小</label>
+            <select v-model.number="localBufferSize" class="select">
+              <option :value="30">30 秒</option>
+              <option :value="60">60 秒</option>
+              <option :value="120">120 秒</option>
+              <option :value="300">300 秒</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>解码模式</label>
+            <select v-model="localDecodeMode" class="select">
+              <option
+                v-for="(label, mode) in DECODE_MODE_LABELS"
+                :key="mode"
+                :value="mode"
+              >{{ label }}</option>
+            </select>
+          </div>
+          <div class="setting-row vertical">
+            <label>FFmpeg 路径</label>
+            <div class="path-row">
+              <input
+                v-model="localFfmpegPath"
+                placeholder="例如 D:\\ffmpeg\\bin\\ffmpeg.exe"
+                class="input path-input"
+                :class="{ 'path-ok': ffmpegStatus === 'ok', 'path-fail': ffmpegStatus === 'fail' }"
+              />
+              <button class="mini-btn" @click="browseFfmpeg" title="浏览选择 ffmpeg 可执行文件">浏览</button>
+              <button class="mini-btn" @click="testFfmpeg" title="测试 ffmpeg 是否可用" :disabled="!localFfmpegPath || testRunning">
+                {{ testRunning ? '测试中...' : '测试' }}
+              </button>
+            </div>
+            <span v-if="ffmpegStatus === 'ok'" class="path-status ok">✓ 检测到 {{ ffmpegVersion }}</span>
+            <span v-if="ffmpegStatus === 'fail'" class="path-status fail">✗ {{ ffmpegError }}</span>
+          </div>
+        </div>
+
+        <div class="section">
+          <h4 class="section-title">字幕设置</h4>
+          <div class="setting-row">
+            <label>字幕字号</label>
+            <select v-model.number="localSubFontSize" class="select">
+              <option :value="12">小 (12px)</option>
+              <option :value="16">中 (16px)</option>
+              <option :value="20">大 (20px)</option>
+              <option :value="24">特大 (24px)</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>字幕颜色</label>
+            <select v-model="localSubColor" class="select">
+              <option value="#ffffff">白色</option>
+              <option value="#ffff00">黄色</option>
+              <option value="#00ff00">绿色</option>
+              <option value="#00bfff">蓝色</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>字幕背景</label>
+            <select v-model="localSubBg" class="select">
+              <option value="transparent">透明</option>
+              <option value="rgba(0,0,0,0.6)">半透明黑</option>
+              <option value="rgba(0,0,0,0.9)">深黑</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section">
+          <h4 class="section-title">网络设置</h4>
+          <div class="setting-row">
+            <label>HTTP 代理</label>
+            <input v-model="localProxy" placeholder="http://127.0.0.1:7890" class="input" />
+          </div>
+          <div class="setting-row">
+            <label>请求超时 (秒)</label>
+            <input type="number" v-model.number="localTimeout" min="3" max="60" class="input-num" />
+          </div>
+        </div>
+
+        <div class="section">
+          <h4 class="section-title">广告过滤</h4>
+
+          <div class="adfilter-block">
+            <div class="block-title">
+              <span class="block-icon">&#x1F6AB;</span> 广告域名黑名单
+              <span class="block-count">{{ allAdHosts.length }} 个</span>
+            </div>
+            <div class="block-desc">命中以下域名的请求将被拦截，不加载广告内容</div>
+            <div class="host-tags">
+              <span
+                v-for="host in allAdHosts"
+                :key="host"
+                class="host-tag"
+                :class="{ 'is-custom': extraAdHosts.includes(host) }"
+              >
+                {{ host }}
+                <button
+                  class="host-remove"
+                  @click.stop="extraAdHosts.includes(host) ? removeCustomHost(host) : removeBuiltinDomain(host)"
+                  :title="extraAdHosts.includes(host) ? '移除自定义' : '移除内置'"
+                >✕</button>
+              </span>
+            </div>
+            <div v-if="removedBuiltinHosts.length > 0" class="removed-section">
+              <div class="removed-title">已移除的内置域名（点击恢复）：</div>
+              <span
+                v-for="host in removedBuiltinHosts"
+                :key="'rm-'+host"
+                class="host-tag is-removed"
+                @click="restoreBuiltinDomain(host)"
+                title="点击恢复"
+              >
+                {{ host }} &#x21A9;
+              </span>
+            </div>
+            <div class="add-row">
+              <input
+                v-model="newAdHost"
+                type="text"
+                class="add-input"
+                placeholder="输入广告域名，如 ad.example.com"
+                @keydown.enter="addCustomHost"
+              />
+              <button class="mini-add-btn" @click="addCustomHost">添加</button>
+              <button v-if="extraAdHosts.length > 0" class="mini-clear-btn" @click="clearAllCustomHosts">清空自定义</button>
+            </div>
+          </div>
+
+          <div class="adfilter-block">
+            <div class="block-title">
+              <span class="block-icon">&#x1F4FA;</span> 广告频道关键词
+              <span class="block-count">{{ allKeywords.length }} 个</span>
+            </div>
+            <div class="block-desc">频道名称命中以下关键词将被自动过滤</div>
+            <div class="host-tags">
+              <span
+                v-for="kw in allKeywords"
+                :key="kw"
+                class="host-tag"
+                :class="{ 'is-custom': extraAdKeywords.includes(kw) }"
+              >
+                {{ kw }}
+                <button
+                  class="host-remove"
+                  @click.stop="extraAdKeywords.includes(kw) ? removeCustomKeyword(kw) : removeBuiltinKw(kw)"
+                  :title="extraAdKeywords.includes(kw) ? '移除自定义' : '移除内置'"
+                >✕</button>
+              </span>
+            </div>
+            <div v-if="removedBuiltinKeywords.length > 0" class="removed-section">
+              <div class="removed-title">已移除的内置关键词（点击恢复）：</div>
+              <span
+                v-for="kw in removedBuiltinKeywords"
+                :key="'rm-'+kw"
+                class="host-tag is-removed"
+                @click="restoreBuiltinKw(kw)"
+                title="点击恢复"
+              >
+                {{ kw }} &#x21A9;
+              </span>
+            </div>
+            <div class="add-row">
+              <input
+                v-model="newKeyword"
+                type="text"
+                class="add-input"
+                placeholder="输入过滤关键词，如 购物"
+                @keydown.enter="addCustomKeyword"
+              />
+              <button class="mini-add-btn" @click="addCustomKeyword">添加</button>
+              <button v-if="extraAdKeywords.length > 0" class="mini-clear-btn" @click="clearAllCustomKeywords">清空自定义</button>
+            </div>
+          </div>
+
+          <div class="adfilter-block">
+            <div class="block-title">
+              <span class="block-icon">&#x2139;</span> 广告过滤说明
+            </div>
+            <div class="block-info">
+              <p><strong>域名黑名单：</strong>在加载 M3U8 播放列表时，自动识别并剔除来自广告域名的 TS 片段。</p>
+              <p><strong>频道关键词：</strong>解析直播源时自动过滤包含广告关键词的频道名称。</p>
+              <p><strong>M3U8 净化：</strong>播放时自动分析 TS 片段时长、帧率等特征，识别并移除广告片段。</p>
+              <p>内置规则参考 TVBox 项目的 AdBlocker 和 M3u8 净化逻辑。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h4 class="section-title">快捷键设置</h4>
+          <div
+            v-for="item in shortcutList"
+            :key="item.id"
+            class="setting-row shortcut-row"
+          >
+            <label>{{ item.name }}</label>
+            <div class="shortcut-controls">
               <button
-                class="host-remove"
-                @click.stop="extraAdHosts.includes(host) ? removeCustomHost(host) : removeBuiltinDomain(host)"
-                :title="extraAdHosts.includes(host) ? '移除自定义' : '移除内置'"
-              >✕</button>
-            </span>
-          </div>
-          <div v-if="removedBuiltinHosts.length > 0" class="removed-section">
-            <div class="removed-title">已移除的内置域名（点击恢复）：</div>
-            <span
-              v-for="host in removedBuiltinHosts"
-              :key="'rm-'+host"
-              class="host-tag is-removed"
-              @click="restoreBuiltinDomain(host)"
-              title="点击恢复"
-            >
-              {{ host }} &#x21A9;
-            </span>
-          </div>
-          <div class="add-row">
-            <input
-              v-model="newAdHost"
-              type="text"
-              class="add-input"
-              placeholder="输入广告域名，如 ad.example.com"
-              @keydown.enter="addCustomHost"
-            />
-            <button class="mini-add-btn" @click="addCustomHost">添加</button>
-            <button v-if="extraAdHosts.length > 0" class="mini-clear-btn" @click="clearAllCustomHosts">清空自定义</button>
-          </div>
-        </div>
-
-        <div class="adfilter-block">
-          <div class="block-title">
-            <span class="block-icon">&#x1F4FA;</span> 广告频道关键词
-            <span class="block-count">{{ allKeywords.length }} 个</span>
-          </div>
-          <div class="block-desc">频道名称命中以下关键词将被自动过滤</div>
-          <div class="host-tags">
-            <span
-              v-for="kw in allKeywords"
-              :key="kw"
-              class="host-tag"
-              :class="{ 'is-custom': extraAdKeywords.includes(kw) }"
-            >
-              {{ kw }}
+                class="shortcut-btn"
+                :class="{ recording: recordingId === item.id }"
+                @click="onShortcutBtnClick(item.id)"
+              >
+                {{ recordingId === item.id ? '按下新快捷键...' : store.formatShortcutDisplay(item.def) }}
+              </button>
               <button
-                class="host-remove"
-                @click.stop="extraAdKeywords.includes(kw) ? removeCustomKeyword(kw) : removeBuiltinKw(kw)"
-                :title="extraAdKeywords.includes(kw) ? '移除自定义' : '移除内置'"
+                v-if="item.def.key"
+                class="shortcut-clear"
+                title="清除此快捷键"
+                @click="store.clearShortcut(item.id)"
               >✕</button>
-            </span>
-          </div>
-          <div v-if="removedBuiltinKeywords.length > 0" class="removed-section">
-            <div class="removed-title">已移除的内置关键词（点击恢复）：</div>
-            <span
-              v-for="kw in removedBuiltinKeywords"
-              :key="'rm-'+kw"
-              class="host-tag is-removed"
-              @click="restoreBuiltinKw(kw)"
-              title="点击恢复"
-            >
-              {{ kw }} &#x21A9;
-            </span>
-          </div>
-          <div class="add-row">
-            <input
-              v-model="newKeyword"
-              type="text"
-              class="add-input"
-              placeholder="输入过滤关键词，如 购物"
-              @keydown.enter="addCustomKeyword"
-            />
-            <button class="mini-add-btn" @click="addCustomKeyword">添加</button>
-            <button v-if="extraAdKeywords.length > 0" class="mini-clear-btn" @click="clearAllCustomKeywords">清空自定义</button>
+              <button
+                class="shortcut-reset"
+                title="恢复默认"
+                @click="store.resetShortcut(item.id)"
+              >↺</button>
+            </div>
           </div>
         </div>
 
-        <div class="adfilter-block">
-          <div class="block-title">
-            <span class="block-icon">&#x2139;</span> 广告过滤说明
+        <div class="section">
+          <h4 class="section-title">数据管理</h4>
+          <div class="setting-row">
+            <button @click="clearCache" class="btn-danger">清除频道缓存</button>
+            <span class="hint">清除本地缓存的频道列表数据</span>
           </div>
-          <div class="block-info">
-            <p><strong>域名黑名单：</strong>在加载 M3U8 播放列表时，自动识别并剔除来自广告域名的 TS 片段。</p>
-            <p><strong>频道关键词：</strong>解析直播源时自动过滤包含广告关键词的频道名称。</p>
-            <p><strong>M3U8 净化：</strong>播放时自动分析 TS 片段时长、帧率等特征，识别并移除广告片段。</p>
-            <p>内置规则参考 TVBox 项目的 AdBlocker 和 M3u8 净化逻辑。</p>
+          <div class="setting-row">
+            <button @click="resetSettings" class="btn-warn">重置所有设置</button>
+            <span class="hint">恢复所有设置到默认值</span>
           </div>
+        </div>
+
+        <div class="panel-footer">
+          <button @click="saveSettings" class="btn-save">💾 保存设置</button>
         </div>
       </div>
-
-      <div class="section">
-        <h4 class="section-title">快捷键设置</h4>
-        <div
-          v-for="item in shortcutList"
-          :key="item.id"
-          class="setting-row shortcut-row"
-        >
-          <label>{{ item.name }}</label>
-          <div class="shortcut-controls">
-            <button
-              class="shortcut-btn"
-              :class="{ recording: recordingId === item.id }"
-              @click="onShortcutBtnClick(item.id)"
-            >
-              {{ recordingId === item.id ? '按下新快捷键...' : store.formatShortcutDisplay(item.def) }}
-            </button>
-            <button
-              v-if="item.def.key"
-              class="shortcut-clear"
-              title="清除此快捷键"
-              @click="store.clearShortcut(item.id)"
-            >✕</button>
-            <button
-              class="shortcut-reset"
-              title="恢复默认"
-              @click="store.resetShortcut(item.id)"
-            >↺</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <h4 class="section-title">数据管理</h4>
-        <div class="setting-row">
-          <button @click="clearCache" class="btn-danger">清除频道缓存</button>
-          <span class="hint">清除本地缓存的频道列表数据</span>
-        </div>
-        <div class="setting-row">
-          <button @click="resetSettings" class="btn-warn">重置所有设置</button>
-          <span class="hint">恢复所有设置到默认值</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel-footer">
-      <button @click="saveSettings" class="btn-save">💾 保存设置</button>
-    </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -255,7 +276,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/store'
-import { DECODE_MODES, DECODE_MODE_LABELS } from '@/constants'
+import { DECODE_MODE_LABELS } from '@/constants'
 import type { DecodeMode } from '@/constants'
 import {
   getAllAdHosts, addAdHosts, removeAdHost, getExtraAdHosts, clearExtraAdHosts,
@@ -270,6 +291,11 @@ const emit = defineEmits<{
   close: []
   saved: [settings: Record<string, any>]
 }>()
+
+function closeDialog() {
+  store.showSettings = false
+  emit('close')
+}
 
 const STORAGE_KEY = 'pclive_settings'
 
@@ -387,7 +413,15 @@ function saveSettings() {
 
 function clearCache() {
   try {
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('pclive') || k.startsWith('live_channel'))
+    const preservedKeys = new Set([
+      'pclive_sources', 'pclive_current_source', 'pclive_channel_state',
+      'pclive_volume', 'pclive_decode_mode', 'pclive_ffmpeg_path',
+      'pclive_local_videos', 'pclive_local_play_mode', 'pclive_shortcuts',
+      'pclive_settings', 'pclive_source_stats',
+    ])
+    const keys = Object.keys(localStorage).filter(
+      k => (k.startsWith('pclive') || k.startsWith('live_channel')) && !preservedKeys.has(k)
+    )
     keys.forEach(k => localStorage.removeItem(k))
     if (window.electronAPI?.clearChannelCache) {
       window.electronAPI.clearChannelCache().catch(() => {})
@@ -414,7 +448,6 @@ function resetSettings() {
   ElMessage.success('已恢复默认设置，请点击保存')
 }
 
-// ============ 广告过滤 ============
 const allAdHosts = ref<string[]>([])
 const extraAdHosts = ref<string[]>([])
 const removedBuiltinHosts = ref<string[]>([])
@@ -424,7 +457,6 @@ const removedBuiltinKeywords = ref<string[]>([])
 const newAdHost = ref('')
 const newKeyword = ref('')
 
-// ============ 快捷键设置 ============
 const shortcutList = computed(() => store.getShortcutList())
 const recordingId = ref<string | null>(null)
 
@@ -441,7 +473,7 @@ function onRecordKeydown(e: KeyboardEvent) {
   e.preventDefault()
   e.stopPropagation()
   const def = store.shortcutEventToDef(e)
-  if (!def.key) return // 忽略纯修饰键
+  if (!def.key) return
   store.setShortcut(recordingId.value, def)
   recordingId.value = null
 }
@@ -530,31 +562,38 @@ function restoreBuiltinKw(kw: string) {
 </script>
 
 <style scoped>
-.settings-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 440px;
-  height: 100%;
-  background: #1a1a2e;
-  border-left: 1px solid #333;
+.settings-root {
+  z-index: 1500;
+}
+
+.dialog-custom-header {
   display: flex;
-  flex-direction: column;
-  z-index: 1000;
-  box-shadow: -4px 0 20px rgba(0,0,0,0.5);
-  color: #ccc;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
-.panel-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 18px; border-bottom: 1px solid #333; flex-shrink: 0;
+.dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e0e0e0;
 }
-.panel-title { font-size: 15px; font-weight: 600; color: #e0e0e0; margin: 0; }
 
-.close-btn { background: none; border: none; color: #888; font-size: 17px; cursor: pointer; }
-.close-btn:hover { color: #fff; }
+.dialog-header-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
 
-.panel-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
+.close-btn { color: #f44336 !important; font-size: 16px !important; padding: 2px 8px !important; }
+.close-btn:hover { color: #ff6b6b !important; }
+
+.settings-content {
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 0 4px;
+}
 
 .section { margin-bottom: 16px; }
 .section-title { font-size: 13px; color: #888; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #2a2a4a; }
@@ -582,8 +621,8 @@ function restoreBuiltinKw(kw: string) {
 
 .setting-value { font-size: 12px; color: #60a5fa; min-width: 35px; text-align: right; }
 
-.slider { flex: 1; height: 4px; -webkit-appearance: none; background: #333; border-radius: 2px; outline: none; }
-.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+.slider { flex: 1; height: 4px; appearance: none; -webkit-appearance: none; background: #333; border-radius: 2px; outline: none; }
+.slider::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
 
 .select, .input, .input-num, .textarea {
   flex: 1; background: #12122a; border: 1px solid #3a3a5a; color: #ccc; padding: 6px 8px;
@@ -613,9 +652,8 @@ function restoreBuiltinKw(kw: string) {
 }
 .btn-warn:hover { background: #f59e0b; }
 
-.panel-footer { padding: 12px 18px; border-top: 1px solid #333; flex-shrink: 0; }
+.panel-footer { padding: 12px 0 0 0; border-top: 1px solid #333; margin-top: 8px; }
 
-/* ============ 广告过滤块样式 ============ */
 .adfilter-block {
   background: #1e1e2e;
   border-radius: 6px;
@@ -780,7 +818,6 @@ function restoreBuiltinKw(kw: string) {
 
 .mini-clear-btn:hover { background: #2e1a1a; }
 
-/* 快捷键设置 */
 .shortcut-row {
   align-items: center;
   gap: 8px;

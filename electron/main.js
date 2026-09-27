@@ -18,8 +18,9 @@ const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('-
 
 const dataDir = (() => {
   if (isDev) return app.getPath('userData')
-  const exeDir = path.dirname(app.getPath('exe'))
-  const dir = path.join(exeDir, 'cache')
+  const dir = app.isPackaged
+    ? path.join(path.dirname(app.getPath('exe')), 'cache')
+    : path.join(__dirname, '..', 'cache')
   try { fs.mkdirSync(dir, { recursive: true }) } catch (_) {}
   app.setPath('userData', dir)
   return dir
@@ -294,7 +295,7 @@ function createWindow() {
 // ============ Logger: dev=详细日志 / prod=精简日志 ============
 const LOG_LEVEL = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, VERBOSE: 4 }
 const LOG_LABEL = ['ERROR', 'WARN ', 'INFO ', 'DEBUG', 'TRACE']
-const CURRENT_LOG_LEVEL = isDev ? LOG_LEVEL.VERBOSE : LOG_LEVEL.INFO
+const CURRENT_LOG_LEVEL = isDev ? LOG_LEVEL.VERBOSE : LOG_LEVEL.DEBUG
 
 const logDir = (() => {
   const dir = isDev ? path.join(__dirname, '..', 'logs') : path.join(dataDir, 'logs')
@@ -1759,11 +1760,13 @@ app.whenReady().then(() => {
     callback({ responseHeaders })
   })
 
-  if (isDev) {
-    mainWindow.webContents.on('console-message', (_e, lvl, msg) => {
-      debugLog(`R[${lvl}] ${msg}`)
-    })
-  }
+  mainWindow.webContents.on('console-message', (_e, lvl, msg) => {
+    debugLog(`R[${lvl}] ${msg}`)
+  })
+
+  ipcMain.on('renderer:log', (_event, msg) => {
+    debugLog(`RENDERER: ${msg}`)
+  })
 
   ipcMain.on('window-minimize', () => mainWindow?.minimize())
   ipcMain.on('window-maximize', () => {
@@ -3038,8 +3041,102 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
     return true
   })
 
+  // ============ 录屏模块 ============
+  // 录屏数据从渲染进程流式写入（MediaRecorder 通过 video.captureStream() 捕获，
+  // 直接从 video 元素抓取原始解码画面+音频，不包含任何 UI 遮挡层）
+  const recordingState = {
+    active: false,
+    outputPath: '',
+    startTime: 0,
+    writeStream: null,
+    totalBytes: 0,
+  }
+
+  function stopRecordingInternal() {
+    if (!recordingState.active) return
+    recordingState.active = false
+    if (recordingState.writeStream) {
+      try { recordingState.writeStream.end() } catch (_) {}
+      recordingState.writeStream = null
+    }
+    const elapsed = ((Date.now() - recordingState.startTime) / 1000).toFixed(1)
+    logInfo(`RECORDING: stopped, elapsed=${elapsed}s, bytes=${recordingState.totalBytes}, output=${recordingState.outputPath}`)
+  }
+
+  ipcMain.handle('recording:selectOutput', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '选择录屏保存位置',
+      defaultPath: `PCLive_${new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)}.webm`,
+      filters: [
+        { name: 'WebM 视频', extensions: ['webm'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled) return { success: false, path: '' }
+    return { success: true, path: result.filePath }
+  })
+
+  ipcMain.handle('recording:startStream', async (_event, { outputPath }) => {
+    if (recordingState.active) {
+      stopRecordingInternal()
+    }
+    if (!outputPath) return { success: false, error: '未指定输出路径' }
+
+    recordingState.outputPath = outputPath
+    recordingState.startTime = Date.now()
+    recordingState.totalBytes = 0
+    recordingState.active = true
+
+    recordingState.writeStream = fs.createWriteStream(outputPath, { flags: 'w' })
+    recordingState.writeStream.on('error', (err) => {
+      logError(`RECORDING: writeStream error: ${err.message}`)
+      stopRecordingInternal()
+    })
+
+    logInfo(`RECORDING: stream started, output=${outputPath}`)
+    return { success: true }
+  })
+
+  ipcMain.handle('recording:writeChunk', async (_event, chunk) => {
+    if (!recordingState.active || !recordingState.writeStream) return { success: false }
+    try {
+      const buf = Buffer.from(chunk)
+      recordingState.writeStream.write(buf)
+      recordingState.totalBytes += buf.length
+      return { success: true }
+    } catch (e) {
+      logError(`RECORDING: writeChunk error: ${e.message}`)
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('recording:finishStream', async () => {
+    if (!recordingState.active) {
+      return { success: false, error: '未在录制' }
+    }
+    const elapsed = ((Date.now() - recordingState.startTime) / 1000).toFixed(1)
+    const totalBytes = recordingState.totalBytes
+    const outputPath = recordingState.outputPath
+    stopRecordingInternal()
+    return { success: true, elapsed, totalBytes, outputPath }
+  })
+
+  ipcMain.handle('recording:status', async () => {
+    if (!recordingState.active) {
+      return { recording: false }
+    }
+    const elapsed = Math.round((Date.now() - recordingState.startTime) / 1000)
+    return {
+      recording: true,
+      elapsed,
+      totalBytes: recordingState.totalBytes,
+      outputPath: recordingState.outputPath,
+    }
+  })
+
 app.on('window-all-closed', () => {
   logInfo('APP: window-all-closed, cleaning up sessions')
+  stopRecordingInternal()
   for (const [id, session] of streamSessions) {
     session.active = false
   }

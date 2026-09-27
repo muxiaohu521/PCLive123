@@ -13,8 +13,7 @@
  * 与 tools/m3u_converter.js 保持一致的转换逻辑
  */
 
-import type { LiveChannelGroup, LiveSourceGroup } from '@/models/LiveChannelItem'
-import type { CacheStorageEntry } from '@/services/ChannelService'
+import type { LiveChannelGroup, CacheStorageEntry } from '@/models/LiveChannelItem'
 
 // 重新导出供外部使用
 export type { CacheStorageEntry }
@@ -116,18 +115,6 @@ function generateM3u(groups: LiveChannelGroup[], sourceName?: string): string {
   }
 
   return lines.join('\n')
-}
-
-// --------------- M3U → CacheStorageEntry ---------------
-
-function m3uToCacheEntry(m3uContent: string, livesGroups?: LiveSourceGroup[]): CacheStorageEntry {
-  const data = parseM3u(m3uContent)
-  return {
-    data,
-    livesGroups: livesGroups || [],
-    time: Date.now(),
-    completedCount: data.reduce((sum, g) => sum + g.liveChannels.length, 0)
-  }
 }
 
 // --------------- CacheStorageEntry → M3U ---------------

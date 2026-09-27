@@ -1,92 +1,95 @@
 <template>
-  <div class="source-manager-panel">
-    <div class="panel-header">
-      <div class="header-left">
-        <h3 class="panel-title">直播源管理</h3>
-        <span class="panel-count">{{ store.sourceList.length }} 个直播源</span>
-      </div>
-      <el-button link :icon="Close" @click="$emit('close')" class="close-btn" />
-    </div>
-
-    <div class="panel-toolbar">
-      <el-button size="small" :icon="FolderOpened" @click="onImportClick" :disabled="!isElectron">
-        导入
-      </el-button>
-      <el-button size="small" :icon="Download" @click="onExportClick" :disabled="importExportDisabled">
-        导出
-      </el-button>
-      <el-button size="small" :icon="FolderOpened" @click="onExportAllClick" :disabled="!isElectron || store.sourceList.length === 0">
-        导出全部
-      </el-button>
-      <el-tooltip content="验证全部直播源连通性" placement="bottom">
-        <el-button size="small" :icon="Refresh" @click="onValidateAll" :loading="validating">
-          验证
-        </el-button>
-      </el-tooltip>
-      <el-tooltip content="查询源IP地理位置" placement="bottom">
-        <el-button size="small" @click="onQueryGeoAll" :loading="queryingGeo">
-          🌍 IP
-        </el-button>
-      </el-tooltip>
-      <el-tooltip content="从网页爬取M3U/TXT源" placement="bottom">
-        <el-button size="small" @click="showCrawlerDialog = true">
-          🕷 爬取
-        </el-button>
-      </el-tooltip>
-      <div class="toolbar-spacer" />
-      <el-button type="primary" size="small" :icon="Plus" @click="showAddDialog = true">
-        添加
-      </el-button>
-    </div>
-
-    <div class="panel-body">
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">直播源列表</span>
+  <div class="source-root">
+    <div class="source-manager-panel">
+      <div class="panel-header">
+        <div class="header-left">
+          <h3 class="panel-title">直播源管理</h3>
+          <span class="panel-count">{{ store.sourceList.length }} 个直播源</span>
         </div>
-        <div class="source-list">
-          <div
-            v-for="source in sortedSourceList"
-            :key="source.url"
-            class="source-item"
-            :class="{ active: source.url === store.currentSource }"
-            @click="onSelectSource(source)"
-          >
-            <div class="source-left">
-              <span class="source-indicator" v-if="source.url === store.currentSource">●</span>
-              <span class="source-health" :class="'health-' + getHealth(source.url)"></span>
-              <div class="source-info">
-                <span class="source-name">{{ source.name }}<span class="source-count" v-if="getSourceCount(source.url) > 0"> {{ getSourceCount(source.url) }}台</span></span>
-                <span class="source-url" :title="source.url">{{ source.url }}</span>
-                <span class="source-geo" v-if="sourceGeo.get(source.url)" :title="sourceGeo.get(source.url)?.isp">
-                  {{ sourceGeo.get(source.url)?.country }}
-                  <span v-if="sourceGeo.get(source.url)?.city">· {{ sourceGeo.get(source.url)?.city }}</span>
-                </span>
+        <div class="header-actions">
+          <el-button link :icon="Close" @click="$emit('close')" class="close-btn" />
+        </div>
+      </div>
+
+      <div class="panel-toolbar">
+        <el-button size="small" :icon="FolderOpened" @click="onImportClick" :disabled="!isElectron">
+          导入
+        </el-button>
+        <el-button size="small" :icon="Download" @click="onExportClick" :disabled="importExportDisabled">
+          导出
+        </el-button>
+        <el-button size="small" :icon="FolderOpened" @click="onExportAllClick" :disabled="!isElectron || store.sourceList.length === 0">
+          导出全部
+        </el-button>
+        <div class="toolbar-spacer" />
+        <el-button type="primary" size="small" :icon="Plus" @click="onAddClick">
+          添加
+        </el-button>
+      </div>
+
+      <div class="panel-body">
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">直播源列表</span>
+          </div>
+          <div class="source-list">
+            <div
+              v-for="source in sortedSourceList"
+              :key="source.url"
+              class="source-item"
+              :class="{ active: source.url === store.currentSource }"
+              @click="onSelectSource(source)"
+            >
+              <div class="source-left">
+                <span class="source-indicator" v-if="source.url === store.currentSource">●</span>
+                <span class="source-health" :class="'health-' + getHealth(source.url)"></span>
+                <div class="source-info">
+                  <span class="source-name">{{ source.name }}<span class="source-count" v-if="getSourceCount(source.url) > 0"> {{ getSourceCount(source.url) }}台</span></span>
+                  <span class="source-url" :title="source.url">{{ source.url }}</span>
+                  <span class="source-geo" v-if="store.sourceGeo?.get(source.url)" :title="store.sourceGeo?.get(source.url)?.isp">
+                    {{ store.sourceGeo?.get(source.url)?.country }}
+                    <span v-if="store.sourceGeo?.get(source.url)?.city">· {{ store.sourceGeo?.get(source.url)?.city }}</span>
+                  </span>
+                </div>
               </div>
-            </div>
-            <div class="source-actions">
-              <el-button link :icon="Edit" size="small" @click.stop="onEdit(source)" title="编辑" />
-              <el-button link :icon="Delete" size="small" @click.stop="onDelete(source)" title="删除" />
+              <div class="source-actions">
+                <el-button link :icon="Edit" size="small" @click.stop="onEdit(source)" title="编辑" />
+                <el-button link :icon="Delete" size="small" @click.stop="onDelete(source)" title="删除" />
+              </div>
             </div>
           </div>
         </div>
+
+        <div class="section" v-if="store.sourceList.length === 0">
+          <div class="empty-state">暂无直播源，点击上方按钮添加或导入</div>
+        </div>
+
+        <div class="section" v-if="store.sourceError && store.channelGroups.length === 0">
+          <div class="error-state">{{ store.sourceError }}</div>
+        </div>
       </div>
 
-      <div class="section" v-if="store.sourceList.length === 0">
-        <div class="empty-state">暂无直播源，点击上方按钮添加或导入</div>
-      </div>
-
-      <div class="section" v-if="store.sourceError && store.channelGroups.length === 0">
-        <div class="error-state">{{ store.sourceError }}</div>
+      <div class="panel-footer">
+        <div class="footer-row">
+          <span class="shortcut">↑↓ 切换源</span>
+          <span class="shortcut">Tab 关闭</span>
+        </div>
       </div>
     </div>
 
     <!-- Add/Edit Dialog -->
     <el-dialog
-      v-model="showAddDialog"
+      :model-value="showAddDialog"
       :title="editingIndex >= 0 ? '编辑直播源' : '添加直播源'"
       width="420px"
+      :modal="false"
+      :append-to-body="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
       destroy-on-close
+      draggable
+      class="source-dialog"
+      @update:model-value="(v: boolean) => showAddDialog = v"
     >
       <el-form :model="formData" label-position="top" size="default">
         <el-form-item label="名称">
@@ -106,10 +109,17 @@
 
     <!-- Import Result Dialog -->
     <el-dialog
-      v-model="showImportResult"
+      :model-value="showImportResult"
       title="导入结果"
       width="420px"
+      :modal="false"
+      :append-to-body="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
       destroy-on-close
+      draggable
+      class="source-dialog"
+      @update:model-value="(v: boolean) => showImportResult = v"
     >
       <div class="import-result">
         <div class="result-row" v-if="importResult">
@@ -139,28 +149,12 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showCrawlerDialog" title="网页爬取 M3U/TXT 源" width="500px">
-      <div class="crawler-form">
-        <el-input v-model="crawlUrl" placeholder="输入网址，如 https://example.com/tv/list" clearable />
-        <el-button type="primary" size="small" @click="onCrawl" :loading="crawling" style="margin-top: 10px;">
-          开始爬取
-        </el-button>
-      </div>
-      <div class="crawl-result" v-if="crawlResults.length > 0">
-        <div class="crawl-hint">找到 {{ crawlResults.length }} 个链接：</div>
-        <div v-for="(item, idx) in crawlResults" :key="idx" class="crawl-item">
-          <el-tag size="small" :type="item.type === 'm3u' ? 'success' : 'warning'">{{ item.type }}</el-tag>
-          <span class="crawl-url" :title="item.url">{{ item.url }}</span>
-          <el-button link @click="onImportCrawlResult(idx)" size="small">导入</el-button>
-        </div>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { Edit, Delete, FolderOpened, Download, Plus, Close, Refresh } from '@element-plus/icons-vue'
+import { Edit, Delete, FolderOpened, Download, Plus, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/store'
 import {
@@ -168,15 +162,11 @@ import {
   exportToM3u,
 } from '@/utils/SourceFileService'
 import { ChannelService, readCacheEntry } from '@/services/ChannelService'
-import type { CacheStorageEntry } from '@/services/ChannelService'
-import type { LiveChannelGroup } from '@/models/LiveChannelItem'
+import type { CacheStorageEntry, LiveChannelGroup } from '@/models/LiveChannelItem'
 import type { SourceImportResult, ExportedChannel } from '@/utils/SourceFileService'
-import { getGeoInfo, getGeoInfoBatch } from '@/utils/GeoService'
-import type { GeoInfo } from '@/utils/GeoService'
-import { crawlSourceUrls } from '@/utils/SourceCrawler'
-import type { CrawlResult } from '@/utils/SourceCrawler'
 import { sanitizeFilename } from '@/utils/m3uConverter'
 import { logger } from '@/utils/logger'
+import { isElectron as checkIsElectron } from '@/constants'
 
 function toBase64(str: string): string {
   const bytes = new TextEncoder().encode(str)
@@ -203,10 +193,7 @@ const showAddDialog = ref(false)
 const editingIndex = ref<number>(-1)
 const formData = reactive({ name: '', url: '' })
 
-const validating = ref(false)
 const sourceHealth = ref<Map<string, 'green' | 'yellow' | 'red' | 'gray'>>(new Map())
-const queryingGeo = ref(false)
-const sourceGeo = ref<Map<string, GeoInfo>>(new Map())
 
 const showImportResult = ref(false)
 const importResult = ref<SourceImportResult | null>(null)
@@ -214,12 +201,15 @@ const importFileName = ref('')
 const importError = ref('')
 const importContentData = ref('')
 
-const showCrawlerDialog = ref(false)
-const crawlUrl = ref('')
-const crawling = ref(false)
-const crawlResults = ref<CrawlResult[]>([])
+const isElectron = computed(() => checkIsElectron())
 
-const isElectron = computed(() => typeof window !== 'undefined' && !!window.electronAPI)
+function onAddClick() {
+  editingIndex.value = -1
+  formData.name = ''
+  formData.url = ''
+  showAddDialog.value = true
+}
+
 const importExportDisabled = computed(() => !store.channelGroups || store.channelGroups.length === 0)
 
 const sortedSourceList = computed(() => store.sortedSourceList)
@@ -262,48 +252,6 @@ function onEdit(source: { name: string; url: string }) {
 async function onDelete(source: { name: string; url: string }) {
   await store.removeSource(source.url)
   ElMessage.success(`已删除 "${source.name}"，同步清除缓存及外部文件`)
-}
-
-async function onValidateAll() {
-  validating.value = true
-  const health = new Map<string, 'green' | 'yellow' | 'red' | 'gray'>()
-  for (const s of store.sourceList) {
-    health.set(s.url, 'gray')
-  }
-
-  const promises = store.sourceList.map(async (s) => {
-    try {
-      const resp = await fetch(s.url, {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(8000),
-      })
-      if (resp.ok || resp.status === 403 || resp.status === 401) {
-        health.set(s.url, 'green')
-      } else {
-        health.set(s.url, 'yellow')
-      }
-    } catch {
-      health.set(s.url, 'red')
-    }
-  })
-
-  await Promise.allSettled(promises)
-  sourceHealth.value = health
-  validating.value = false
-
-  const green = Array.from(health.values()).filter(v => v === 'green').length
-  const red = Array.from(health.values()).filter(v => v === 'red').length
-  ElMessage.success(`验证完成: ${green} 个可访问, ${red} 个不可访问`)
-}
-
-async function onQueryGeoAll() {
-  queryingGeo.value = true
-  const urls = store.sourceList.map(s => s.url)
-  const result = await getGeoInfoBatch(urls)
-  sourceGeo.value = result
-  queryingGeo.value = false
-  const found = result.size
-  ElMessage.success(`IP查询完成: ${found} 个源获取到地理位置`)
 }
 
 async function onSave() {
@@ -475,42 +423,6 @@ async function onConfirmImport() {
 
   showImportResult.value = false
   importContentData.value = ''
-}
-
-async function onCrawl() {
-  if (!crawlUrl.value) return
-  crawling.value = true
-  crawlResults.value = []
-  try {
-    const results = await crawlSourceUrls(crawlUrl.value)
-    crawlResults.value = results
-    if (results.length === 0) ElMessage.info('未找到 M3U/TXT 链接')
-  } catch (e: any) {
-    ElMessage.error('爬取失败: ' + (e.message || '未知错误'))
-  } finally {
-    crawling.value = false
-  }
-}
-
-async function onImportCrawlResult(idx: number) {
-  const item = crawlResults.value[idx]
-  if (!item) return
-  try {
-    const resp = await fetch(item.url, { signal: AbortSignal.timeout(15000) })
-    const text = await resp.text()
-    importFileName.value = item.url.split('/').pop() || 'crawl_result'
-    const parsed = parseImportContent(text, importFileName.value)
-    if (parsed && parsed.channelCount > 0) {
-      importContentData.value = text
-      importResult.value = parsed
-      showImportResult.value = true
-      showCrawlerDialog.value = false
-    } else {
-      ElMessage.warning('未能解析该源内容')
-    }
-  } catch (e: any) {
-    ElMessage.error('获取源内容失败: ' + (e.message || '网络错误'))
-  }
 }
 
 function extractSourceName(url: string): string {
@@ -714,6 +626,10 @@ function extractChannelsFromCurrentGroups(): ExportedChannel[] {
 </script>
 
 <style scoped>
+.source-root {
+  height: 100%;
+}
+
 .source-manager-panel {
   display: flex;
   flex-direction: column;
@@ -726,7 +642,7 @@ function extractChannelsFromCurrentGroups(): ExportedChannel[] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 10px;
+  padding: 12px 14px 8px;
 }
 
 .header-left {
@@ -772,19 +688,44 @@ function extractChannelsFromCurrentGroups(): ExportedChannel[] {
   flex: 1;
   overflow-y: auto;
   padding: 0 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a6a #1a1a2e;
 }
 
 .panel-body::-webkit-scrollbar {
-  width: 4px;
+  width: 8px;
 }
 
 .panel-body::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1a1a2e;
+  border-radius: 4px;
 }
 
 .panel-body::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 2px;
+  background: #4a4a6a;
+  border-radius: 4px;
+  border: 2px solid #1a1a2e;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8a;
+}
+
+.panel-footer {
+  padding: 8px 14px;
+  border-top: 1px solid #2a2a3e;
+  flex-shrink: 0;
+}
+
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.shortcut {
+  font-size: 10px;
+  color: #555;
 }
 
 .section {
@@ -952,14 +893,4 @@ function extractChannelsFromCurrentGroups(): ExportedChannel[] {
   font-size: 13px;
   line-height: 1.5;
 }
-
-.crawler-form { display: flex; flex-direction: column; gap: 8px; }
-
-.crawl-result { margin-top: 12px; }
-
-.crawl-hint { font-size: 12px; color: #888; margin-bottom: 8px; }
-
-.crawl-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #2a2a4a; }
-
-.crawl-url { flex: 1; font-size: 11px; color: #777; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -95,4 +95,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeYspChannels: (data) => ipcRenderer.invoke('ysp-channels:write', data),
   openYspChannelsFile: () => ipcRenderer.invoke('ysp-channels:openFile'),
   getYspChannelsPath: () => ipcRenderer.invoke('ysp-channels:getPath'),
+
+  recordingSelectOutput: () => ipcRenderer.invoke('recording:selectOutput'),
+  recordingStartStream: (params) => ipcRenderer.invoke('recording:startStream', params),
+  recordingWriteChunk: (chunk) => ipcRenderer.invoke('recording:writeChunk', chunk),
+  recordingFinishStream: () => ipcRenderer.invoke('recording:finishStream'),
+  recordingStatus: () => ipcRenderer.invoke('recording:status'),
+
+  rendererLog: (msg) => ipcRenderer.send('renderer:log', msg),
 })

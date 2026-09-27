@@ -397,7 +397,7 @@ function parseM3u(str: string): JsonObject[] {
       const rawTitle = get(line, TITLE_PATTERN)
       pending = { name: rawTitle }
       const quality = extractQuality(rawTitle)
-      if (quality) (pending as any).quality = quality
+      if (quality) pending.quality = quality
       mergeMeta(pending as Record<string, unknown>, buildMeta(line))
       mergeMeta(pending as Record<string, unknown>, pendingMeta)
       pendingMeta = {}
@@ -422,9 +422,9 @@ function parseM3u(str: string): JsonObject[] {
       mergeMeta(pendingMeta, buildSetting(parts[1]))
     }
     mergeMeta(pending as Record<string, unknown>, pendingMeta)
-    const urls: string[] = (pending as any).urls || []
+    const urls: string[] = (pending.urls as string[] | undefined) || []
     if (!urls.includes(url)) urls.push(url)
-    ;(pending as any).urls = urls
+    pending.urls = urls
     addChannel(curGroup, pending)
     pendingMeta = {}
   }
@@ -473,7 +473,7 @@ function normalizeJson(groups: JsonObject[]): JsonObject[] {
       const ch = normalizeChannelItem(g)
       addChannel(outG, ch)
     }
-    return [(outG.channels as any[]).length > 0 ? outG : { group: DEFAULT_GROUP, channels: [] }]
+    return [(outG.channels as JsonObject[]).length > 0 ? outG : { group: DEFAULT_GROUP, channels: [] }]
   }
 
   const result: JsonObject[] = []
@@ -495,7 +495,7 @@ function normalizeJson(groups: JsonObject[]): JsonObject[] {
       const ch = normalizeChannelItem(g)
       addChannel(outG, ch)
     }
-    if (!(outG.channels as any[]).length) (outG.channels as any[]) = []
+    if (!(outG.channels as JsonObject[]).length) outG.channels = []
     result.push(outG)
   }
   return result
@@ -515,12 +515,6 @@ export function parseToJsonArray(str: string): JsonObject[] {
   return parseTxt(s)
 }
 
-function parseFromBuffer(buffer: ArrayBuffer): JsonObject[] {
-  if (!buffer || buffer.byteLength === 0) return []
-  const str = detectAndDecode(buffer)
-  return parseToJsonArray(str)
-}
-
 function parseJsonObject(obj: Record<string, unknown>): JsonObject[] {
   const result: JsonObject[] = []
 
@@ -530,7 +524,7 @@ function parseJsonObject(obj: Record<string, unknown>): JsonObject[] {
       group: safeStr(obj.group || obj.name, DEFAULT_GROUP),
       channels
     }
-    for (const ch of obj.channels as any[]) {
+    for (const ch of obj.channels as unknown[]) {
       if (typeof ch === 'object' && ch !== null) {
         channels.push(normalizeChannelItem(ch))
       }
@@ -539,7 +533,7 @@ function parseJsonObject(obj: Record<string, unknown>): JsonObject[] {
   }
 
   if (obj.groups && Array.isArray(obj.groups)) {
-    for (const g of obj.groups as any[]) {
+    for (const g of obj.groups as Record<string, unknown>[]) {
       if (typeof g === 'object' && g !== null) {
         const channels: JsonObject[] = []
         const grp: JsonObject = {
@@ -566,7 +560,7 @@ function parseJsonObject(obj: Record<string, unknown>): JsonObject[] {
     for (const [key, val] of groupLikeEntries) {
       const channels: JsonObject[] = []
       const grp: JsonObject = { group: key, channels }
-      for (const ch of val as any[]) {
+      for (const ch of val as unknown[]) {
         if (typeof ch === 'object' && ch !== null) {
           channels.push(normalizeChannelItem(ch))
         }

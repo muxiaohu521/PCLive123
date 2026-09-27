@@ -29,6 +29,7 @@ declare global {
     isLive: boolean
     siteMeta?: { site: string; bvid?: string; cid?: number; pid?: string; aid?: number; title?: string; pageUrl?: string }
     fromApi?: boolean
+    _isCrawl?: boolean
   }
 
   interface SniffResponse {
@@ -36,6 +37,8 @@ declare global {
     error?: string
     urls: SniffResult[]
     totalFound?: number
+    phase?: string
+    hint?: string
   }
 
   interface DlnaDevice {
@@ -134,6 +137,14 @@ declare global {
 
       // 央视频 (yangshipin.cn) —— 提取官方频道链接
       yspExtractChannels: () => Promise<YspChannelsResult>
+
+      // 录屏（基于 video.captureStream()，直接从 video 元素抓取原始画面+音频）
+      recordingSelectOutput: () => Promise<{ success: boolean; path: string }>
+      recordingStartStream: (params: { outputPath: string }) => Promise<{ success: boolean; error?: string }>
+      recordingWriteChunk: (chunk: ArrayBuffer) => Promise<{ success: boolean }>
+      recordingFinishStream: () => Promise<{ success: boolean; error?: string; elapsed?: string; totalBytes?: number; outputPath?: string }>
+      recordingStatus: () => Promise<{ recording: boolean; elapsed?: number; totalBytes?: number; outputPath?: string }>
+      rendererLog: (msg: string) => void
     }
   }
 

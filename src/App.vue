@@ -68,7 +68,6 @@
           @close="store.showDlna = false"
         />
         <SettingsPanel
-          v-if="store.showSettings"
           @close="store.showSettings = false"
           @saved="onSettingsSaved"
         />
@@ -132,6 +131,7 @@ import LocalChannelsList from '@/components/LocalChannelsList.vue'
 import YspPanel from '@/components/YspPanel.vue'
 
 const store = useAppStore()
+
 const {
   menu: inputMenu,
   hideMenu: hideInputMenu,
@@ -174,7 +174,6 @@ const sourceInfo = computed(() => {
   return { sourceIndex: 0, sourceNum: 0 }
 })
 
-const currentChannelName = computed(() => store.currentChannel?.channelName ?? '')
 const currentChannelUrl = computed(() => store.currentUrl || '')
 
 const bottomBarTitle = computed(() => {
@@ -480,9 +479,6 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLocalVideoList = false
       store.showLivesPanel = false
       store.showLocalChannelsList = false
-    } else {
-      store.yspWebviewUrl = ''
-      store.yspWebviewTitle = ''
     }
     return
   }
@@ -773,12 +769,6 @@ function onYspWebviewReady(event: any) {
   })
 }
 
-function onCloseYspWebview() {
-  logger.info('[YSP:wv] close')
-  store.yspWebviewUrl = ''
-  store.yspWebviewTitle = ''
-}
-
 </script>
 
 <style>
@@ -901,5 +891,45 @@ body {
 .input-context-menu .menu-item:hover {
   background: rgba(64, 158, 255, 0.15);
   color: #fff;
+}
+</style>
+
+<style>
+.side-panels .el-modal-dialog,
+.side-panels .el-overlay-dialog {
+  pointer-events: none !important;
+}
+.side-panels .el-dialog {
+  pointer-events: auto !important;
+}
+.source-dialog-overlay {
+  pointer-events: none !important;
+}
+.source-dialog-overlay .el-overlay-dialog {
+  pointer-events: none !important;
+}
+.source-dialog-overlay .el-dialog {
+  pointer-events: auto !important;
+}
+
+.side-panels .el-dialog {
+  --el-dialog-bg-color: #0a0a0a;
+  background: #0a0a0a !important;
+  border: 1px solid #333 !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
+}
+.side-panels .el-dialog__header {
+  background: #0a0a0a !important;
+  border-bottom: 1px solid #2a2a3e !important;
+  padding: 12px 16px !important;
+}
+.side-panels .el-dialog__body {
+  background: #0a0a0a !important;
+  color: #ccc !important;
+  padding: 16px !important;
+}
+.side-panels .el-dialog__footer {
+  background: #0a0a0a !important;
+  border-top: 1px solid #2a2a3e !important;
 }
 </style>

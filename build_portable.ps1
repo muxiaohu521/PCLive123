@@ -1,4 +1,4 @@
-# ================================================================
+﻿# ================================================================
 #  PCLive Portable Build Script
 #  便携版构建脚本 - 解压即用，无需安装
 #  用法: powershell -ExecutionPolicy Bypass -File build_portable.ps1

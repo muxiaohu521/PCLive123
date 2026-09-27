@@ -49,7 +49,6 @@ export function setFetchUrlFullFunc(fn: (url: string, headers: Record<string, st
 
 async function httpRequest(url: string, options: SpiderReqOptions): Promise<SpiderReqResult> {
   const method = String(options.method || 'GET').toUpperCase()
-  const timeout = options.timeout || 10000
   const headers: Record<string, string> = {}
   const redirect = Number(options.redirect || 0)
   const maxRedirects = 5
@@ -227,7 +226,7 @@ function createHtmlParserBindings(): Record<string, Function> {
   }
 }
 
-function executeSpiderModule(code: string, ext: string): SpiderInstance | null {
+function executeSpiderModule(code: string, _ext: string): SpiderInstance | null {
   const parserBindings = createHtmlParserBindings()
 
   const apiMethods: Record<string, Function> = {

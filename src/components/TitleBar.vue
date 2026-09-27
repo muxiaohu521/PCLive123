@@ -206,9 +206,6 @@ function toggleYspPanel() {
     store.showLivesPanel = false
     store.showLocalVideoList = false
     store.showLocalChannelsList = false
-  } else {
-    store.yspWebviewUrl = ''
-    store.yspWebviewTitle = ''
   }
 }
 

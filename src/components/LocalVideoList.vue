@@ -5,7 +5,9 @@
         <h3 class="panel-title">本地视频</h3>
         <span class="panel-count">{{ store.localVideoList.length }} 个视频</span>
       </div>
-      <el-button link :icon="Close" @click="$emit('close')" class="close-btn" />
+      <div class="header-actions">
+        <el-button link :icon="Close" @click="$emit('close')" class="close-btn" />
+      </div>
     </div>
 
     <div class="panel-toolbar">
@@ -50,6 +52,13 @@
         </div>
       </div>
     </div>
+
+    <div class="panel-footer">
+      <div class="footer-row">
+        <span class="shortcut">↑↓ 切换视频</span>
+        <span class="shortcut">Tab 关闭</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -59,6 +68,7 @@ import { Close, FolderAdd, Delete, VideoCamera } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/store'
 import type { LocalVideoItem } from '@/constants'
+import { isElectron as checkIsElectron } from '@/constants'
 
 const emit = defineEmits<{
   close: []
@@ -67,7 +77,7 @@ const emit = defineEmits<{
 
 const store = useAppStore()
 
-const isElectron = computed(() => typeof window !== 'undefined' && !!window.electronAPI)
+const isElectron = computed(() => checkIsElectron())
 
 async function onImportFile() {
   if (!isElectron.value) {
@@ -164,48 +174,50 @@ function onDeleteVideo(video: LocalVideoItem) {
   display: flex;
   flex-direction: column;
   background: #1a1a2e;
-  border-left: 1px solid #2a2a4a;
-  pointer-events: auto;
+  border-left: 1px solid #2a2a3e;
 }
 
 .panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid #2a2a4a;
+  padding: 12px 14px 8px;
   flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
 }
 
 .panel-title {
   font-size: 15px;
-  font-weight: 600;
-  color: #e0e0e0;
+  font-weight: 700;
+  color: #fff;
   margin: 0;
 }
 
 .panel-count {
-  font-size: 12px;
-  color: #888;
+  font-size: 11px;
+  color: #555;
 }
 
 .close-btn {
-  color: #888;
-  font-size: 18px;
+  color: #666 !important;
+  padding: 4px !important;
+  font-size: 18px !important;
+}
+
+.close-btn:hover {
+  color: #fff !important;
 }
 
 .panel-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid #2a2a4a;
+  padding: 0 14px 10px;
   flex-shrink: 0;
 }
 
@@ -216,7 +228,48 @@ function onDeleteVideo(video: LocalVideoItem) {
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 0;
+}
+
+.panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: #1a1a2e;
+  border-radius: 4px;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: #4a4a6a;
+  border-radius: 4px;
+  border: 2px solid #1a1a2e;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8a;
+}
+
+.panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a6a #1a1a2e;
+}
+
+.panel-footer {
+  padding: 8px 14px;
+  border-top: 1px solid #2a2a3e;
+  flex-shrink: 0;
+}
+
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.shortcut {
+  font-size: 10px;
+  color: #555;
 }
 
 .section {

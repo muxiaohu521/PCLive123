@@ -2,9 +2,10 @@ import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { ChannelService } from '@/services/ChannelService'
 import { logger } from '@/utils/logger'
-import { STORAGE_KEYS, PLAY_MODES, filePathToUrl } from '@/constants'
+import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI } from '@/constants'
 import type { SourceItem, DecodeMode, LocalVideoItem, PlayMode } from '@/constants'
 import type { LiveChannelGroup, LiveChannelItem, LiveSourceGroup } from '@/models/LiveChannelItem'
+import type { GeoInfo } from '@/utils/GeoService'
 import {
   getChannelUrl,
   getChannelHeaders,
@@ -69,12 +70,6 @@ function saveSourcesLocal(list: SourceItem[]): void {
   localStorage.setItem(STORAGE_KEYS.SOURCES, JSON.stringify(list))
 }
 
-function hasElectronAPI(): boolean {
-  return typeof window !== 'undefined' && window.electronAPI !== undefined
-    && typeof window.electronAPI.getSources === 'function'
-    && typeof window.electronAPI.saveSources === 'function'
-}
-
 async function loadSourcesFromFile(): Promise<SourceItem[]> {
   if (hasElectronAPI()) {
     try {
@@ -131,10 +126,6 @@ async function deleteSourceCache(url: string): Promise<void> {
       logger.warn('deleteSourceCache: failed to delete cache for', url, e)
     }
   }
-}
-
-function saveVolume(volume: number): void {
-  localStorage.setItem(STORAGE_KEYS.VOLUME, String(volume))
 }
 
 function loadVolume(): number {
@@ -253,6 +244,7 @@ export const useAppStore = defineStore('app', () => {
   const connectivityMode = ref<'all' | 'unparsed'>('unparsed')
   const connectivityProgress = ref({ current: 0, total: 0, currentName: '' })
   const showToolsDialog = ref(false)
+  const sourceGeo = ref<Map<string, GeoInfo>>(new Map())
 
   let connectAbortController: AbortController | null = null
 
@@ -1207,6 +1199,7 @@ function _doPersistSourceStats(): void {
     connectivityMode,
     connectivityProgress,
     showToolsDialog,
+    sourceGeo,
     currentSource,
     channelGroups,
     currentGroupIndex,

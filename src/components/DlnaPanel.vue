@@ -67,7 +67,7 @@ const props = defineProps<{
   currentUrl: string
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   close: []
 }>()
 

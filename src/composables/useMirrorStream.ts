@@ -12,7 +12,6 @@
  * 否则完整重建 PeerConnection。
  */
 
-import { logger } from '@/utils/logger'
 import type Artplayer from 'artplayer'
 
 export interface MirrorControlHandler {
@@ -117,7 +116,7 @@ export function useMirrorStream() {
     if (!isMirroring || !art) return
     currentArt = art
 
-    const video = (art as any).video as HTMLVideoElement | undefined
+    const video = art.video as HTMLVideoElement | undefined
     if (!video) return
 
     if (useCanvasFallback && canvasEl && mirrorPC && mirrorStream) {
@@ -168,7 +167,7 @@ export function useMirrorStream() {
     currentArt = art
     setupSignalListener()
 
-    const video = (art as any).video as HTMLVideoElement | undefined
+    const video = art.video as HTMLVideoElement | undefined
     if (!video) return
 
     useCanvasFallback = false

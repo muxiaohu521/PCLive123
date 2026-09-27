@@ -14,7 +14,7 @@
 - 基于 ArtPlayer 播放器内核，集成 HLS.js 和 mpegts.js
 - **解码模式切换**：自动 / 硬解 / 软解 / FFmpeg 解码，适配不同硬件环境
 - 频道线路切换（多线路自动切换，播放失败自动切下一个线路）
-- **本地直播源模块**：71 个精选 CCTV+卫视频道，每频道多线路，支线路独立编辑/增删
+- **本地直播源模块**：69 个精选 CCTV+卫视频道，每频道多线路，支持线路独立编辑/增删
 - 音量控制、静音、暂停/播放
 - 键盘快捷键操作（上下键切频道、左右键切线路、空格播放/暂停、数字键选台等）
 
@@ -138,7 +138,7 @@ PCLive/
 │   │   ├── VideoPlayer.vue       # 视频播放器（ArtPlayer 封装，多格式支持）
 │   │   ├── ChannelList.vue       # 频道列表面板（搜索、分组切换）
 │   │   ├── SourceManager.vue     # 直播源管理面板（增删改、导入导出）
-│   │   ├── LocalChannelsList.vue # 本地直播源面板（71频道、逐线路编辑）
+│   │   ├── LocalChannelsList.vue # 本地直播源面板（69频道、逐线路编辑）
 │   │   ├── LivesPanel.vue        # 子线路列表面板
 │   │   ├── LocalVideoList.vue    # 本地视频/音频列表
 │   │   ├── ToolsDialog.vue       # 工具对话框（连通性测试、链接嗅探）
@@ -179,12 +179,10 @@ PCLive/
 │   └── types/
 │       └── global.d.ts           # 全局类型声明
 ├── data/                         # 数据文件（全部跟踪版本控制）
-│   ├── verified_channels.json    # 本地直播源（71频道 × 多线路）
+│   ├── verified_channels.json    # 本地直播源（69频道 × 多线路）
 │   ├── sources.json              # 远程直播源配置
 │   ├── ysp_channels.json         # 央视频频道配置
 │   └── cache/                    # 原始直播源缓存（37个源JSON）
-├── scripts/
-│   └── extract_common_channels.py # 频道URL提取/聚合/去重脚本
 ├── dist/                         # Vite 构建产物
 ├── index.html                    # HTML 入口
 ├── vite.config.ts                # Vite 配置
@@ -258,14 +256,22 @@ powershell -ExecutionPolicy Bypass -File build_portable.ps1 -CleanOnly
 ```
 PCLive-portable/PCLive/
 ├── PCLive.exe              # Electron 可执行文件
-├── ffmpeg.dll              # 视频解码器
+├── ffmpeg.dll              # 音视频编解码
+├── d3dcompiler_47.dll      # Direct3D 编译器
+├── libEGL.dll              # OpenGL ES 接口
 ├── libGLESv2.dll           # OpenGL ES 渲染
-├── d3dcompiler_47.dll      # DirectX 编译器
+├── vk_swiftshader.dll      # Vulkan 软件渲染
+├── vulkan-1.dll            # Vulkan 加载器
+├── vk_swiftshader_icd.json # Vulkan 配置
 ├── icudtl.dat              # 国际化数据
-├── resources.pak / chrome_*.pak   # Chromium 资源包
+├── resources.pak / chrome_*.pak   # Chromium UI 资源
 ├── snapshot_blob.bin / v8_context_snapshot.bin  # V8 快照
-├── locales/                # 语言包（zh-CN, en-US）
-├── sources.json            # 默认直播源配置
+├── locales/                # 语言包（zh-CN, en-US 精简）
+├── data/                   # 数据文件
+│   ├── sources.json        # 默认直播源配置（37个源）
+│   ├── verified_channels.json  # 本地直播源（69频道）
+│   ├── ysp_channels.json   # 央视频频道配置
+│   └── cache/              # 原始直播源缓存（37个JSON）
 ├── BUILD_INFO.txt          # 构建信息
 └── resources/app/          # 应用程序代码（目录模式，非 asar）
     ├── dist/               # 前端构建产物
@@ -284,14 +290,15 @@ PCLive-portable/PCLive/
 | `←` / `→` | 切换上/下一线路 |
 | `0-9` | 快速跳转到对应编号频道 |
 | `空格` | 播放 / 暂停 |
+| `C` | 展开/收起频道列表 |
 | `K` | 打开/关闭本地直播源列表 |
 | `O` | 打开/关闭官网直播源（央视频） |
-| `Tab` | 展开/收起频道列表 |
-| `Ctrl+S` | 直播源管理面板 |
-| `Ctrl+T` | 工具面板（连通性测试 / 链接嗅探） |
-| `L` | 子线路列表面板 |
-| `D` | DLNA 投屏面板 |
 | `V` | 本地视频列表 |
+| `L` | 子线路列表面板 |
+| `Ctrl+Shift+S` | 直播源管理面板 |
+| `Ctrl+Shift+X` | 工具面板（连通性测试 / 链接嗅探） |
+| `Ctrl+Shift+D` | DLNA 投屏面板 |
+| `Ctrl+,` | 设置面板 |
 | `Esc` | 关闭所有侧边面板 |
 | `F5` | 强制重新加载频道数据 |
 | `F11` | 全屏切换 |
@@ -361,7 +368,7 @@ http://example.com/cctv1.m3u8
 ## 更新日志
 
 ### v1.2.0
-- 新增 **本地直播源模块**（`LocalChannelsList.vue`）：71 个精选 CCTV+卫视频道，每频道数十条线路
+- 新增 **本地直播源模块**（`LocalChannelsList.vue`）：69 个精选 CCTV+卫视频道，每频道多线路
 - 本地直播源支持 **逐线路编辑**：添加/修改/删除单条 URL，拖拽移动弹窗，暗色主题
 - 新增 **线路切换**快捷键 `←` / `→`，播放失败自动切换下一线路
 - 新增 `K` 键快速打开/关闭本地直播源列表

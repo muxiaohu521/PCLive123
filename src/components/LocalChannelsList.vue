@@ -35,7 +35,10 @@
     </div>
 
     <div class="panel-footer">
-      <span class="hint-text">K 切换 | ↑↓ 切换频道</span>
+      <div class="footer-row">
+        <span class="shortcut">↑↓ 切换频道</span>
+        <span class="shortcut">K 切换</span>
+      </div>
     </div>
 
     <!-- 添加/编辑频道弹窗 -->
@@ -56,7 +59,7 @@
         <el-form-item label="线路">
           <div class="url-lines">
             <div
-              v-for="(line, li) in channelForm.urlLines"
+              v-for="(_line, li) in channelForm.urlLines"
               :key="li"
               class="url-line-row"
             >
@@ -184,7 +187,7 @@ async function onDeleteChannel(idx: number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 10px;
+  padding: 12px 14px 8px;
 }
 
 .header-left {
@@ -195,18 +198,24 @@ async function onDeleteChannel(idx: number) {
 
 .panel-title {
   font-size: 15px;
-  font-weight: 600;
-  color: #e0e0e0;
+  font-weight: 700;
+  color: #fff;
   margin: 0;
 }
 
 .panel-count {
-  font-size: 12px;
-  color: #888;
+  font-size: 11px;
+  color: #555;
 }
 
 .close-btn {
-  color: #999;
+  color: #666 !important;
+  padding: 4px !important;
+  font-size: 18px !important;
+}
+
+.close-btn:hover {
+  color: #fff !important;
 }
 
 .toolbar {
@@ -220,12 +229,27 @@ async function onDeleteChannel(idx: number) {
 }
 
 .panel-body::-webkit-scrollbar {
-  width: 4px;
+  width: 8px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: #1a1a2e;
+  border-radius: 4px;
 }
 
 .panel-body::-webkit-scrollbar-thumb {
-  background: #444;
-  border-radius: 2px;
+  background: #4a4a6a;
+  border-radius: 4px;
+  border: 2px solid #1a1a2e;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8a;
+}
+
+.panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a6a #1a1a2e;
 }
 
 .channel-item {
@@ -278,15 +302,18 @@ async function onDeleteChannel(idx: number) {
 }
 
 .panel-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 8px 14px;
   border-top: 1px solid #2a2a3e;
-  background: #16162a;
+  flex-shrink: 0;
 }
 
-.hint-text {
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.shortcut {
   font-size: 10px;
   color: #555;
 }
@@ -434,6 +461,14 @@ async function onDeleteChannel(idx: number) {
 
 .channel-edit-dialog .el-dialog__headerbtn {
   top: 12px;
+}
+
+/* dialog 穿透：overlay wrapper 不拦截点击 */
+.local-channels-panel :deep(.el-overlay) {
+  pointer-events: none;
+}
+.local-channels-panel :deep(.el-dialog) {
+  pointer-events: auto;
 }
 
 .channel-edit-dialog .el-overlay-dialog {
