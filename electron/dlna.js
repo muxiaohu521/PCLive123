@@ -15,7 +15,29 @@ let discoverySocket = null
 let discoveredDevices = []
 let discoveryTimer = null
 
+// ---- 日志系统 ----
+let _dlnaLogCallback = null
+
+function setLogCallback(cb) {
+  _dlnaLogCallback = cb
+}
+
+function dLog(level, msg) {
+  const line = `[DLNA] ${msg}`
+  if (level === 'ERROR') {
+    console.error(line)
+  } else if (level === 'WARN') {
+    console.warn(line)
+  } else {
+    console.log(line)
+  }
+  if (_dlnaLogCallback) {
+    try { _dlnaLogCallback(level, line) } catch (_) {}
+  }
+}
+
 function discoverDevices(timeout = DISCOVERY_TIMEOUT) {
+  dLog('INFO', 'discoverDevices start, timeout=' + timeout + 'ms')
   return new Promise((resolve) => {
     discoveredDevices = []
     const seen = new Set()
@@ -27,7 +49,7 @@ function discoverDevices(timeout = DISCOVERY_TIMEOUT) {
     discoverySocket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
 
     discoverySocket.on('error', (err) => {
-      console.error('[DLNA] Socket error:', err.message)
+      dLog('ERROR', 'Socket error: ' + err.message)
       try { discoverySocket.close() } catch (_) {}
       resolve(discoveredDevices)
     })
@@ -61,7 +83,9 @@ function discoverDevices(timeout = DISCOVERY_TIMEOUT) {
         if (idx >= 0) {
           discoveredDevices[idx] = { ...discoveredDevices[idx], ...info }
         }
-      }).catch(() => {})
+      }).catch((e) => {
+        dLog('ERROR', 'fetchDeviceInfo failed for ' + location + ': ' + (e.message || e))
+      })
     })
 
     discoverySocket.bind(() => {
@@ -73,13 +97,14 @@ function discoverDevices(timeout = DISCOVERY_TIMEOUT) {
       ).join('')
 
       discoverySocket.send(searchMsg, 0, searchMsg.length, SSDP_PORT, SSDP_MULTICAST, (err) => {
-        if (err) console.error('[DLNA] M-SEARCH send error:', err.message)
+        if (err) dLog('ERROR', 'M-SEARCH send error: ' + err.message)
       })
 
       if (discoveryTimer) clearTimeout(discoveryTimer)
       discoveryTimer = setTimeout(() => {
         try { discoverySocket.close() } catch (_) {}
         discoverySocket = null
+        dLog('INFO', 'discoverDevices done, found=' + discoveredDevices.length + ' devices')
         resolve(discoveredDevices)
       }, timeout)
     })
@@ -177,12 +202,20 @@ function sendSoapAction(controlUrl, serviceType, action, params = {}) {
         if (res.statusCode === 200) {
           resolve(data)
         } else {
-          reject(new Error(`SOAP error ${res.statusCode}: ${data.substring(0, 200)}`))
+          const errMsg = `SOAP error ${res.statusCode}: ${data.substring(0, 200)}`
+          dLog('ERROR', action + ' failed: ' + errMsg)
+          reject(new Error(errMsg))
         }
       })
     })
-    req.on('error', reject)
-    req.on('timeout', () => { req.destroy(); reject(new Error('SOAP timeout')) })
+    req.on('error', (e) => {
+      dLog('ERROR', action + ' request error: ' + (e.message || e))
+      reject(e)
+    })
+    req.on('timeout', () => {
+      dLog('ERROR', action + ' request timeout')
+      req.destroy(); reject(new Error('SOAP timeout'))
+    })
     req.write(soapBody)
     req.end()
   })
@@ -191,6 +224,7 @@ function sendSoapAction(controlUrl, serviceType, action, params = {}) {
 async function setAvTransportUri(device, url, metadata = '') {
   if (!device.avTransportUrl) throw new Error('No AVTransport service URL')
 
+  dLog('INFO', 'setAVTransportURI device=' + (device.friendlyName || 'unknown') + ' url=' + url.substring(0, 100))
   const instanceId = '0'
   const currentUriMeta = metadata || `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>Video</dc:title><upnp:class>object.item.videoItem</upnp:class></item></DIDL-Lite>`
 
@@ -205,6 +239,7 @@ async function setAvTransportUri(device, url, metadata = '') {
 
 async function playDevice(device, speed = '1') {
   if (!device.avTransportUrl) throw new Error('No AVTransport service URL')
+  dLog('INFO', 'play device=' + (device.friendlyName || 'unknown'))
   return sendSoapAction(device.avTransportUrl, 'urn:schemas-upnp-org:service:AVTransport:1', 'Play', {
     InstanceID: '0',
     Speed: speed,
@@ -213,6 +248,7 @@ async function playDevice(device, speed = '1') {
 
 async function stopDevice(device) {
   if (!device.avTransportUrl) throw new Error('No AVTransport service URL')
+  dLog('INFO', 'stop device=' + (device.friendlyName || 'unknown'))
   return sendSoapAction(device.avTransportUrl, 'urn:schemas-upnp-org:service:AVTransport:1', 'Stop', {
     InstanceID: '0',
   })
@@ -220,6 +256,7 @@ async function stopDevice(device) {
 
 async function pauseDevice(device) {
   if (!device.avTransportUrl) throw new Error('No AVTransport service URL')
+  dLog('INFO', 'pause device=' + (device.friendlyName || 'unknown'))
   return sendSoapAction(device.avTransportUrl, 'urn:schemas-upnp-org:service:AVTransport:1', 'Pause', {
     InstanceID: '0',
   })
@@ -250,6 +287,7 @@ async function setVolume(device, volume) {
 }
 
 module.exports = {
+  setLogCallback,
   discoverDevices,
   setAvTransportUri,
   playDevice,

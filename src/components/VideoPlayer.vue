@@ -70,7 +70,7 @@ const networkInterceptor = new NetworkInterceptor()
 const {
   subtitleEnabled,
   subtitleVttUrl,
-  handleSubtitleClick,
+  toggleSubtitle,
   destroy: destroySubtitle,
 } = useSubtitle()
 
@@ -175,9 +175,8 @@ function cleanupFfmpegSeek(): void {
     _ffmpegSeekCleanup = null
   }
   _ffmpegSeekOffset = 0
-  _ffmpegSeeking = false
-  _ffmpegSuppressNextSeek = false
   _ffmpegUserSeekTarget = 0
+  _ffmpegSuppressNextSeek = false
   if (_ffmpegSuppressSeekTimer) {
     clearTimeout(_ffmpegSuppressSeekTimer)
     _ffmpegSuppressSeekTimer = null
@@ -242,13 +241,25 @@ function updateSourceLabel(): void {
 }
 
 function updateControlLabels(): void {
+  if (!art) return
   const mode = store.activePlayMode
-  if (!mode || !art) return
   const player = art
 
   const setDisp = (name: string, show: boolean) => {
     const el = player.controls[name] as HTMLElement | undefined
     if (el) el.style.display = show ? '' : 'none'
+  }
+
+  if (!mode) {
+    setDisp('prev-channel', false)
+    setDisp('next-channel', false)
+    setDisp('prev-source', false)
+    setDisp('source-info', false)
+    setDisp('next-source', false)
+    setDisp('play-mode', false)
+    setDisp('subtitle-cc', true)
+    setDisp('float-window', false)
+    return
   }
 
   const showChannel = mode === 'local' || mode === 'channel' || mode === 'locallive'
@@ -260,6 +271,7 @@ function updateControlLabels(): void {
   setDisp('next-source', mode === 'channel' || mode === 'locallive')
   setDisp('play-mode', mode === 'local')
   setDisp('subtitle-cc', mode !== 'channel' && mode !== 'locallive')
+  setDisp('float-window', true)
 
   if (mode === 'local') {
     const pc = art.controls['prev-channel'] as HTMLElement | undefined; if (pc) pc.setAttribute('title', '上一视频')
@@ -347,6 +359,31 @@ function updateSubtitleIndicator(): void {
   }
 }
 
+const SUBTITLE_STYLE_KEY = 'pclive_settings'
+
+function getSubtitleStyle(): Record<string, string> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SUBTITLE_STYLE_KEY) || '{}')
+    const fontSize = saved.subFontSize || 16
+    const color = saved.subColor || '#ffffff'
+    const background = saved.subBg || 'rgba(0,0,0,0.6)'
+    return {
+      fontSize: `${fontSize}px`,
+      color,
+      background,
+      textShadow: '1px 1px 2px #000',
+    }
+  } catch (_) {
+    return { fontSize: '16px', color: '#ffffff', background: 'rgba(0,0,0,0.6)' }
+  }
+}
+
+function applySubtitleStyle(): void {
+  if (art) {
+    art.subtitle.style(getSubtitleStyle())
+  }
+}
+
 // ── 控件注册 ──
 
 function addCustomControls(): void {
@@ -405,9 +442,9 @@ function addCustomControls(): void {
     name: 'subtitle-cc',
     position: 'right',
     html: '<span id="pclive-sub-indicator" class="pclive-sub-indicator off">CC</span>',
-    tooltip: '字幕 (点击加载/切换)',
+    tooltip: '字幕 (显示/隐藏)',
     style: { fontSize: '12px', marginRight: '6px', cursor: 'pointer' },
-    click() { handleSubtitleClick() },
+    click() { toggleSubtitle() },
   })
 
   art.controls.add({
@@ -447,6 +484,8 @@ function addCustomControls(): void {
   })
 
   updateControlLabels()
+
+  
 }
 
 // ── 解码引擎清理 ──
@@ -564,8 +603,12 @@ function patchVideoDuration(video: HTMLVideoElement, realDuration: number): void
     _ffmpegDurationCleanup = null
   }
 
-  const instanceDesc = Object.getOwnPropertyDescriptor(video, 'duration')
-  const protoDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(video), 'duration')
+  let proto: any = video
+  let origDurationDesc: PropertyDescriptor | undefined
+  while (proto && !origDurationDesc) {
+    origDurationDesc = Object.getOwnPropertyDescriptor(proto, 'duration')
+    proto = Object.getPrototypeOf(proto)
+  }
   let active = true
   const apply = () => {
     if (!active || !video || realDuration <= 0) return
@@ -599,14 +642,13 @@ function patchVideoDuration(video: HTMLVideoElement, realDuration: number): void
     active = false
     video.removeEventListener('durationchange', onDurationChange)
     video.removeEventListener('loadedmetadata', onLoadedMeta)
-    const restore = instanceDesc || protoDesc
-    if (restore && restore.configurable) {
+    if (origDurationDesc && origDurationDesc.configurable) {
       try {
         Object.defineProperty(video, 'duration', {
-          get: restore.get,
-          set: restore.set,
+          get: origDurationDesc.get,
+          set: origDurationDesc.set,
           configurable: true,
-          enumerable: restore.enumerable,
+          enumerable: origDurationDesc.enumerable,
         })
         return
       } catch (_) {}
@@ -616,11 +658,14 @@ function patchVideoDuration(video: HTMLVideoElement, realDuration: number): void
 }
 
 function patchVideoCurrentTime(video: HTMLVideoElement, offset: number): (() => void) | null {
-  const instanceDesc = Object.getOwnPropertyDescriptor(video, 'currentTime')
-  const protoDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(video), 'currentTime')
-  const origDesc = instanceDesc || protoDesc
+  let proto: any = video
+  let origDesc: PropertyDescriptor | undefined
+  while (proto && !origDesc) {
+    origDesc = Object.getOwnPropertyDescriptor(proto, 'currentTime')
+    proto = Object.getPrototypeOf(proto)
+  }
   if (!origDesc || !origDesc.get || !origDesc.set) {
-    logger.warn('[VideoPlayer] Cannot patch video.currentTime')
+    logger.warn('[VideoPlayer] Cannot patch video.currentTime (no accessor in prototype chain)')
     return null
   }
   const origGet = origDesc.get.bind(video)
@@ -666,8 +711,8 @@ function setupFfmpegSeekHandler(video: HTMLVideoElement, url: string, genId: num
 
   const onSeeking = () => {
     if (_ffmpegSeeking) return
-    if (_ffmpegSuppressNextSeek) {
-      logger.info('[VideoPlayer] FFmpeg seek suppressed (post-rebuild init)')
+    if (_ffmpegSuppressNextSeek && _ffmpegUserSeekTarget <= 0) {
+      logger.info('[VideoPlayer] FFmpeg seek suppressed (post-rebuild init, not user-initiated)')
       return
     }
 
@@ -685,7 +730,6 @@ function setupFfmpegSeekHandler(video: HTMLVideoElement, url: string, genId: num
       _ffmpegUserSeekTarget = 0
       const seekTarget = pendingSeekTime
       logger.info('[VideoPlayer] FFmpeg seek to:', seekTarget.toFixed(1), 's (target from user)')
-      await closeCurrentSession()
       await playLocalFfmpeg(url, genId, seekTarget)
       _ffmpegSeeking = false
 
@@ -694,7 +738,7 @@ function setupFfmpegSeekHandler(video: HTMLVideoElement, url: string, genId: num
       _ffmpegSuppressSeekTimer = setTimeout(() => {
         _ffmpegSuppressNextSeek = false
         _ffmpegSuppressSeekTimer = null
-      }, 2000)
+      }, 500)
     }, 300)
   }
 
@@ -911,6 +955,10 @@ async function playLocalFfmpeg(url: string, genId: number, seekTime?: number): P
   disposeHls(video)
   disposeFlv(video)
   disposeAudioPlayer()
+
+  video.pause()
+  video.removeAttribute('src')
+  video.load()
   await closeCurrentSession()
 
   if (!store.ffmpegPath) {
@@ -937,9 +985,7 @@ async function playLocalFfmpeg(url: string, genId: number, seekTime?: number): P
         logger.info('[VideoPlayer] FFmpeg probed duration:', result.duration.toFixed(1), 's')
         patchVideoDuration(video, result.duration)
       }
-      if (effectiveSeek > 0) {
-        _ffmpegCurrentTimeCleanup = patchVideoCurrentTime(video, effectiveSeek)
-      }
+      _ffmpegCurrentTimeCleanup = patchVideoCurrentTime(video, effectiveSeek)
       video.src = result.proxyUrl
       video.play().catch(() => {})
       setupFfmpegSeekHandler(video, url, genId, result.duration || 0)
@@ -1007,6 +1053,8 @@ async function playLocalFile(url: string): Promise<void> {
 
   lastLoadUrl = url
   cleanupFfmpegPatches()
+  _ffmpegSeeking = false
+  _ffmpegSuppressNextSeek = false
 
   const ext = getLocalExt(url)
   const mode = store.decodeMode
@@ -1223,6 +1271,10 @@ async function createPlayer(): Promise<void> {
     airplay: false,
     theme: '#4fc3f7',
     lang: 'zh-cn',
+    subtitle: {
+      type: 'vtt',
+      style: getSubtitleStyle(),
+    },
     moreVideoAttr: {
       preload: 'auto',
     },
@@ -1607,6 +1659,8 @@ async function loadUrl(url: string, headers: Record<string, string>): Promise<vo
     hasEverPlayed = false
     cleanupLocalEndedDetector()
     cleanupFfmpegPatches()
+    _ffmpegSeeking = false
+    _ffmpegSuppressNextSeek = false
   }
   stopCurrentPlayback()
   await closeCurrentSession()
@@ -1638,6 +1692,8 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
   disposeAudioPlayer()
   cleanupLocalEndedDetector()
   cleanupFfmpegPatches()
+  _ffmpegSeeking = false
+  _ffmpegSuppressNextSeek = false
 
   const unsupportedProto = isUnsupportedProtocol(url)
   if (unsupportedProto) {
@@ -2173,6 +2229,7 @@ watch(
   ([newUrl, newHeaders, , newMode], [, , , oldMode]) => {
     if (newMode !== oldMode) {
       updateControlLabels()
+      if (!newMode) closeFloatWindow()
       if (art?.video) {
         disposeHls(art.video as HTMLVideoElement)
         disposeFlv(art.video as HTMLVideoElement)
@@ -2180,6 +2237,8 @@ watch(
       disposeAudioPlayer()
       cleanupLocalEndedDetector()
       cleanupFfmpegPatches()
+      _ffmpegSeeking = false
+      _ffmpegSuppressNextSeek = false
       clearStallWatchdog()
       confirmedFormat = null
       currentFormat = ''
@@ -2204,6 +2263,31 @@ watch(() => props.info, () => updateSourceLabel(), { deep: true })
 watch(() => store.decodeMode, (newMode, oldMode) => {
   if (newMode !== oldMode) {
     updateDecodeButton()
+  }
+})
+
+// 字幕同步到 ArtPlayer
+watch(subtitleVttUrl, (url) => {
+  if (url && art) {
+    art.subtitle.switch(url, { type: 'vtt' })
+      .then(() => {
+        logger.info('[Subtitle] ArtPlayer subtitle loaded')
+        applySubtitleStyle()
+      })
+      .catch((e: any) => logger.error('[Subtitle] ArtPlayer subtitle switch error:', e))
+  }
+})
+
+watch(subtitleEnabled, (enabled) => {
+  if (art) {
+    art.subtitle.show = enabled
+  }
+  updateSubtitleIndicator()
+})
+
+watch(() => store.subtitleStyleVersion, () => {
+  if (art && subtitleVttUrl.value) {
+    applySubtitleStyle()
   }
 })
 
@@ -2233,6 +2317,22 @@ defineExpose({
 }
 .video-inner :deep(.artplayer-control) {
   pointer-events: auto !important;
+}
+.video-inner :deep(.art-bottom) {
+  overflow: visible !important;
+  z-index: 9999 !important;
+}
+.video-inner :deep(.art-settings) {
+  z-index: 99999 !important;
+}
+.video-inner :deep(.art-info) {
+  z-index: 99999 !important;
+}
+.video-inner :deep(.art-contextmenus) {
+  z-index: 99999 !important;
+}
+.video-inner :deep(.art-layers) {
+  z-index: 99999 !important;
 }
 .video-inner :deep(.pclive-sub-indicator) {
   font-weight: 800; padding: 2px 6px; border-radius: 3px; font-size: 11px;

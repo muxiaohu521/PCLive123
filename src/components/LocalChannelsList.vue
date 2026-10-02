@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="local-channels-panel">
     <div class="panel-header">
       <div class="header-left">
@@ -14,6 +14,7 @@
 
     <div class="toolbar">
       <el-button :icon="Plus" size="small" type="primary" @click="onAddChannel">添加频道</el-button>
+      <el-button size="small" type="success" :loading="syncing" @click="onSyncToTV">同步到TV</el-button>
     </div>
 
     <div class="panel-body">
@@ -72,6 +73,20 @@
               />
               <el-button
                 link
+                class="move-btn"
+                :disabled="li === 0"
+                @click.stop="onMoveUrlLineUp(li)"
+                title="上移"
+              >&#9650;</el-button>
+              <el-button
+                link
+                class="move-btn"
+                :disabled="li === channelForm.urlLines.length - 1"
+                @click.stop="onMoveUrlLineDown(li)"
+                title="下移"
+              >&#9660;</el-button>
+              <el-button
+                link
                 :icon="Delete"
                 size="small"
                 class="url-line-del"
@@ -107,6 +122,7 @@ const store = useAppStore()
 const showChannelDialog = ref(false)
 const editingChannelIdx = ref(-1)
 const channelForm = reactive({ name: '', urlLines: [''] as string[] })
+const syncing = ref(false)
 
 const totalCount = computed(() => store.localChannelsData.lives.length)
 
@@ -142,6 +158,20 @@ function onRemoveUrlLine(li: number) {
   channelForm.urlLines.splice(li, 1)
 }
 
+function onMoveUrlLineUp(li: number) {
+  if (li <= 0 || li >= channelForm.urlLines.length) return
+  const item = channelForm.urlLines[li]
+  channelForm.urlLines.splice(li, 1)
+  channelForm.urlLines.splice(li - 1, 0, item)
+}
+
+function onMoveUrlLineDown(li: number) {
+  if (li < 0 || li >= channelForm.urlLines.length - 1) return
+  const item = channelForm.urlLines[li]
+  channelForm.urlLines.splice(li, 1)
+  channelForm.urlLines.splice(li + 1, 0, item)
+}
+
 async function onSaveChannel() {
   if (!channelForm.name) return
 
@@ -163,6 +193,14 @@ async function onSaveChannel() {
 
   await store.saveLocalChannels()
   ElMessage.success(editingChannelIdx.value >= 0 ? '频道已更新' : '频道已添加')
+}
+
+async function onSyncToTV() {
+  if (store.localChannelsData.lives.length === 0) {
+    ElMessage.warning('没有可同步的频道')
+    return
+  }
+  store.showSyncTVPanel = !store.showSyncTVPanel
 }
 
 async function onDeleteChannel(idx: number) {
@@ -491,5 +529,24 @@ async function onDeleteChannel(idx: number) {
   background: #1a1a1a;
   border-color: #333;
   color: #c0c0c0;
+}
+
+.move-btn {
+  font-size: 11px;
+  padding: 0 4px;
+  color: #555;
+  min-width: auto;
+  flex-shrink: 0;
+}
+
+.move-btn:hover:not(:disabled) {
+  color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.move-btn:disabled {
+  color: #2a2a2a;
+  cursor: not-allowed;
+  opacity: 0.3;
 }
 </style>

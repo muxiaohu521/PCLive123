@@ -10,6 +10,51 @@
       </div>
     </div>
 
+    <!-- 分支选择器 -->
+    <div class="branch-bar">
+      <div class="branch-selector">
+        <el-select
+          v-model="activeBranchId"
+          size="small"
+          class="branch-select"
+          popper-class="branch-popper"
+          @change="onBranchChange"
+        >
+          <el-option
+            v-for="branch in store.localVideoBranches"
+            :key="branch.id"
+            :label="branch.name + ' (' + branch.videos.length + ')'"
+            :value="branch.id"
+          />
+        </el-select>
+        <el-button
+          link
+          :icon="Plus"
+          size="small"
+          class="branch-btn"
+          title="新建分支"
+          @click="onAddBranch"
+        />
+        <el-button
+          link
+          :icon="Edit"
+          size="small"
+          class="branch-btn"
+          title="重命名分支"
+          @click="onRenameBranch"
+        />
+        <el-button
+          v-if="store.localVideoBranches.length > 1"
+          link
+          :icon="Delete"
+          size="small"
+          class="branch-btn branch-btn-del"
+          title="删除整个分支"
+          @click="onDeleteBranch"
+        />
+      </div>
+    </div>
+
     <div class="panel-toolbar">
       <el-button size="small" :icon="FolderAdd" @click="onImportFolder" :disabled="!isElectron">
         导入文件夹
@@ -59,16 +104,39 @@
         <span class="shortcut">Tab 关闭</span>
       </div>
     </div>
+
+    <!-- 新建 / 重命名分支弹窗 -->
+    <el-dialog
+      v-model="showBranchDialog"
+      :title="branchDialogTitle"
+      width="360px"
+      :close-on-click-modal="false"
+      :modal="false"
+      :append-to-body="false"
+      draggable
+      class="branch-edit-dialog"
+    >
+      <el-form label-width="60px" @submit.prevent="onConfirmBranchDialog">
+        <el-form-item label="名称">
+          <el-input v-model="branchFormName" placeholder="输入分支名称" maxlength="30" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showBranchDialog = false">取消</el-button>
+        <el-button type="primary" @click="onConfirmBranchDialog">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Close, FolderAdd, Delete, VideoCamera } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { computed, ref, watch } from 'vue'
+import { Close, FolderAdd, Delete, VideoCamera, Plus, Edit } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/store'
 import type { LocalVideoItem } from '@/constants'
 import { isElectron as checkIsElectron } from '@/constants'
+import { logger } from '@/utils/logger'
 
 const emit = defineEmits<{
   close: []
@@ -79,20 +147,97 @@ const store = useAppStore()
 
 const isElectron = computed(() => checkIsElectron())
 
+// 分支选择器
+const activeBranchId = ref(store.activeLocalVideoBranchId)
+
+watch(() => store.activeLocalVideoBranchId, (val) => {
+  activeBranchId.value = val
+})
+
+function onBranchChange(branchId: string) {
+  store.setActiveLocalVideoBranch(branchId)
+}
+
+// 分支弹窗
+const showBranchDialog = ref(false)
+const branchDialogMode = ref<'add' | 'rename'>('add')
+const branchFormName = ref('')
+const renamingBranchId = ref('')
+
+const branchDialogTitle = computed(() => {
+  return branchDialogMode.value === 'add' ? '新建分支' : '重命名分支'
+})
+
+function onAddBranch() {
+  branchDialogMode.value = 'add'
+  branchFormName.value = ''
+  renamingBranchId.value = ''
+  showBranchDialog.value = true
+}
+
+function onRenameBranch() {
+  const branch = store.localVideoBranches.find(b => b.id === store.activeLocalVideoBranchId)
+  if (!branch) return
+  branchDialogMode.value = 'rename'
+  branchFormName.value = branch.name
+  renamingBranchId.value = branch.id
+  showBranchDialog.value = true
+}
+
+function onConfirmBranchDialog() {
+  const isAdd = branchDialogMode.value === 'add'
+  const ok = isAdd
+    ? !!store.addLocalVideoBranch(branchFormName.value)
+    : store.renameLocalVideoBranch(renamingBranchId.value, branchFormName.value)
+  if (ok) {
+    const name = branchFormName.value.trim()
+    ElMessage.success(isAdd ? `已创建分支 "${name}"` : `已重命名为 "${name}"`)
+    showBranchDialog.value = false
+  } else {
+    ElMessage.warning('分支名称已存在或无效')
+  }
+}
+
+async function onDeleteBranch() {
+  const branch = store.localVideoBranches.find(b => b.id === store.activeLocalVideoBranchId)
+  if (!branch) return
+  const count = branch.videos.length
+  const msg = count > 0
+    ? `确定要删除分支 "${branch.name}" 吗？该分支包含 ${count} 个视频，删除后不可恢复！`
+    : `确定要删除分支 "${branch.name}" 吗？`
+  try {
+    await ElMessageBox.confirm(msg, '删除分支', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    const ok = store.removeLocalVideoBranch(branch.id)
+    if (ok) {
+      ElMessage.success(`已删除分支 "${branch.name}"`)
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
 async function onImportFile() {
   if (!isElectron.value) {
     ElMessage.warning('导入功能仅支持 Electron 环境')
     return
   }
   try {
-    const result = await window.electronAPI!.openFileDialog({
+    logger.log('[LocalVideo] onImportFile: 调用 openMediaFile')
+    const result = await window.electronAPI!.openMediaFile({
       title: '选择视频文件',
       filters: [
         { name: '媒体文件', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts', 'mts', 'm2ts', 'ogv', '3gp', '3g2', 'asf', 'vob', 'rmvb', 'divx', 'mp3', 'm4a', 'aac', 'wav', 'flac', 'opus', 'wma', 'ape', 'alac', 'aiff', 'aif', 'ogg'] },
         { name: '所有文件', extensions: ['*'] },
       ],
     })
+    logger.log('[LocalVideo] onImportFile: result=', JSON.stringify(result))
     if (!result || !result.filePath) {
+      logger.warn('[LocalVideo] onImportFile: 无结果或无文件路径, result=', result)
+      ElMessage.warning('未选择文件')
       return
     }
 
@@ -111,14 +256,20 @@ async function onImportFile() {
     }
     const added = store.addLocalVideos([video])
     if (added > 0) {
-      ElMessage.success(`已添加 "${fileName}"`)
+      ElMessage.success(`已添加 "${fileName}" 到 "${activeBranchName.value}"`)
     } else {
       ElMessage.warning(`"${fileName}" 已在列表中`)
     }
   } catch (e: any) {
+    logger.error('[LocalVideo] onImportFile: 异常', e)
     ElMessage.error('导入失败: ' + (e.message || '未知错误'))
   }
 }
+
+const activeBranchName = computed(() => {
+  const branch = store.localVideoBranches.find(b => b.id === store.activeLocalVideoBranchId)
+  return branch?.name || '默认列表'
+})
 
 async function onImportFolder() {
   if (!isElectron.value) {
@@ -147,8 +298,8 @@ async function onImportFolder() {
     const skipped = dirResult.files.length - added
     if (added > 0) {
       const msg = skipped > 0
-        ? `已添加 ${added} 个视频，${skipped} 个已存在`
-        : `已添加 ${added} 个视频`
+        ? `已添加 ${added} 个视频到 "${activeBranchName.value}"，${skipped} 个已存在`
+        : `已添加 ${added} 个视频到 "${activeBranchName.value}"`
       ElMessage.success(msg)
     } else {
       ElMessage.warning('所选文件夹下的视频文件均已存在列表中')
@@ -211,6 +362,48 @@ function onDeleteVideo(video: LocalVideoItem) {
 
 .close-btn:hover {
   color: #fff !important;
+}
+
+/* 分支选择器 */
+.branch-bar {
+  padding: 0 14px 8px;
+  flex-shrink: 0;
+}
+
+.branch-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.branch-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.branch-select :deep(.el-input__wrapper) {
+  background: #2a2a3e;
+  border-color: #3a3a4e;
+  box-shadow: none;
+}
+
+.branch-select :deep(.el-input__inner) {
+  color: #ccc;
+  font-size: 12px;
+}
+
+.branch-btn {
+  color: #888 !important;
+  padding: 4px !important;
+  font-size: 14px !important;
+}
+
+.branch-btn:hover {
+  color: #409eff !important;
+}
+
+.branch-btn-del:hover {
+  color: #f56c6c !important;
 }
 
 .panel-toolbar {
@@ -365,5 +558,18 @@ function onDeleteVideo(video: LocalVideoItem) {
   margin-top: 8px;
   font-size: 12px;
   color: #666;
+}
+
+.branch-edit-dialog :deep(.el-dialog) {
+  background: #1e1e30;
+  border: 1px solid #3a3a4e;
+}
+
+.branch-edit-dialog :deep(.el-dialog__title) {
+  color: #ccc;
+}
+
+.branch-edit-dialog :deep(.el-form-item__label) {
+  color: #999;
 }
 </style>

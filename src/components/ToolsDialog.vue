@@ -34,16 +34,6 @@
             </span>
           </div>
           <div class="dialog-header-actions">
-            <el-button
-              v-if="store.connectivityTesting && activeTab === 'connectivity'"
-              link
-              size="small"
-              type="danger"
-              class="cancel-btn"
-              @click="store.cancelConnectivityTest()"
-            >
-              取消测试
-            </el-button>
             <el-button link size="small" @click="minimize" class="minimize-btn" title="最小化">
               &#x2500;
             </el-button>
@@ -1097,10 +1087,6 @@ onMounted(() => {
 .close-btn { color: #f44336 !important; font-size: 16px !important; padding: 2px 8px !important; }
 
 .close-btn:hover { color: #ff6b6b !important; }
-
-.cancel-btn { color: #ff9800 !important; font-size: 12px !important; padding: 2px 10px !important; }
-
-.cancel-btn:hover { color: #ffb74d !important; }
 
 /* ============ 内容区域 ============ */
 .tools-content {

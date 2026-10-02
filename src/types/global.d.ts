@@ -1,4 +1,4 @@
-import type Hls from 'hls.js'
+﻿import type Hls from 'hls.js'
 import type { SourceItem } from '@/constants'
 
 interface FileDialogResult {
@@ -56,6 +56,27 @@ declare global {
     connectionManagerUrl: string
   }
 
+  interface TlvCastOptions {
+    format?: 'auto' | 'hls' | 'mpegts'
+    quality?: 'original' | '1080p' | '720p' | '480p' | '360p'
+    position?: number
+  }
+
+  interface TlvDevice {
+    host: string
+    displayHost?: string
+    port: number
+    app: string
+    version: string
+    deviceName: string
+    deviceModel: string
+    manufacturer: string
+    caps: string[]
+    isTVLive: boolean
+    autoconnect: boolean
+    isEmulator?: boolean
+  }
+
   interface Window {
     Hls: typeof Hls
     electronAPI?: {
@@ -79,6 +100,10 @@ declare global {
       clearNetworkingConfig: () => Promise<boolean>
 
       openFileDialog: (options?: {
+        title?: string
+        filters?: { name: string; extensions: string[] }[]
+      }) => Promise<FileDialogResult | null>
+      openMediaFile: (options?: {
         title?: string
         filters?: { name: string; extensions: string[] }[]
       }) => Promise<FileDialogResult | null>
@@ -106,6 +131,7 @@ declare global {
       floatWindowUpdate: (videoInfo: { url: string; headers?: Record<string, string>; format?: string; title?: string; currentTime?: number; playing?: boolean }) => Promise<void>
       closeFloatWindow: () => Promise<void>
       floatWindowExists: () => Promise<boolean>
+      toggleFloatFullscreen: () => Promise<void>
       onFloatVideoUpdate: (callback: (data: { url: string; headers: Record<string, string>; format: string; title: string; currentTime?: number; playing?: boolean }) => void) => () => void
 
       mirrorSignal: (data: any) => Promise<void>
@@ -115,6 +141,23 @@ declare global {
       dlnaStop: (deviceIndex: number) => Promise<{ success: boolean; error?: string }>
       dlnaPause: (deviceIndex: number) => Promise<{ success: boolean; error?: string }>
       dlnaSetVolume: (deviceIndex: number, volume: number) => Promise<{ success: boolean; error?: string }>
+
+      tlv1Discover: (opts?: { expanded?: boolean }) => Promise<{ success: boolean; error?: string; devices: TlvDevice[] }>
+      tlv1Cast: (deviceIndex: number, videoUrl: string, options?: TlvCastOptions) => Promise<{ success: boolean; error?: string; sessionId?: string; proxyUrl?: string }>
+      tlv1Stop: (deviceIndex: number, sessionId?: string | null) => Promise<{ success: boolean; error?: string }>
+      tlv1Seek: (deviceIndex: number, positionSec: number, sessionId: string) => Promise<{ success: boolean; error?: string }>
+      tlv1Pause: (deviceIndex: number, sessionId: string, currentPosition?: number) => Promise<{ success: boolean; error?: string; message?: string }>
+      tlv1Resume: (deviceIndex: number, sessionId: string) => Promise<{ success: boolean; error?: string; sessionId?: string; proxyUrl?: string; message?: string }>
+      tlv1SyncLocalChannels: (deviceIndex: number, channelsData: any) => Promise<{ success: boolean; error?: string; count?: number }>
+      tlv1GetSubnets: () => Promise<{ success: boolean; error?: string; subnets: string[] }>
+      tlv1GetLocalIps: () => Promise<{ success: boolean; error?: string; ips: string[] }>
+      tlv1EmulatorStatus: () => Promise<{ success: boolean; error?: string; available: boolean; adbPath?: string; emulators?: { serial: string; isEmulator: boolean; isNAT: boolean }[]; natEmulators?: { serial: string; isEmulator: boolean; isNAT: boolean }[]; portForwarded?: boolean }>
+      tlv1EmulatorForward: () => Promise<{ success: boolean; error?: string; setup: boolean; reason?: string; serial?: string; emulators?: { serial: string; isEmulator: boolean; isNAT: boolean }[] }>
+      tlv1Connect: (ip: string) => Promise<{ success: boolean; error?: string; device?: TlvDevice }>
+      tlv1SelectAdb: () => Promise<{ success: boolean; path: string; version?: string; error?: string }>
+      tlv1SetAdbPath: (path: string | null) => Promise<{ success: boolean; error?: string }>
+      tlv1GetAdbPath: () => Promise<{ success: boolean; path: string; isOverride: boolean }>
+      tlv1OnLog: (callback: (log: { level: string; msg: string; data?: any; time: string }) => void) => () => void
 
       ffmpegSelectPath: () => Promise<{ success: boolean; path: string }>
       ffmpegTest: (ffmpegPath: string) => Promise<{ success: boolean; version: string; error?: string }>

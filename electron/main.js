@@ -1,4 +1,4 @@
-const dns = require('dns')
+﻿const dns = require('dns')
 dns.setDefaultResultOrder('ipv4first')
 
 const { app, BrowserWindow, ipcMain, dialog, session, net, shell } = require('electron')
@@ -9,12 +9,42 @@ const https = require('https')
 const { URL } = require('url')
 const zlib = require('zlib')
 const dlna = require('./dlna')
+const tvlive = require('./tvlive')
+
+tvlive.setLogCallback(({ level, msg, data, time }) => {
+  const line = `[tlv1] [${level}] [${time}] ${msg}`
+  if (level === 'ERRO') logError(line)
+  else if (level === 'WARN') logWarn(line)
+  else logInfo(line)
+})
+dlna.setLogCallback((level, msg) => {
+  if (level === 'ERROR') logError(msg)
+  else if (level === 'WARN') logWarn(msg)
+  else logInfo(msg)
+})
 const sniffer = require('./sniffer')
 const yspHandler = require('./ysp_handler')
 const os = require('os')
 const { purifyM3u8Playlist } = require('./m3u8Purifier')
 
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev')
+
+function safeCorsOrigin(req) {
+  const origin = (req.headers && (req.headers.origin || req.headers.Origin))
+  return origin || '*'
+}
+
+function toBase64Url(buf) {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromBase64Url(str) {
+  try {
+    str = str.replace(/-/g, '+').replace(/_/g, '/')
+    while (str.length % 4) str += '='
+    return Buffer.from(str, 'base64')
+  } catch (_) { return Buffer.alloc(0) }
+}
 
 const dataDir = (() => {
   if (isDev) return app.getPath('userData')
@@ -303,18 +333,15 @@ const logDir = (() => {
   return dir
 })()
 const debugLogFile = path.join(logDir, 'pclive-debug.log')
-try { fs.writeFileSync(debugLogFile, '=== PCLive Debug ===\n') } catch (_) {}
+try { fs.appendFileSync(debugLogFile, '\n=== PCLive Session ' + new Date().toISOString() + ' ===\n') } catch (_) {}
 
 function writeLog(level, msg) {
   if (level > CURRENT_LOG_LEVEL) return
   const label = LOG_LABEL[level] || '????'
   const line = `[${new Date().toISOString()}] [${label}] ${msg}`
+  const fn = level <= LOG_LEVEL.WARN ? 'error' : 'log'
+  console[fn](line)
   try { fs.appendFileSync(debugLogFile, line + '\n') } catch (_) {}
-  if (msg.startsWith('FFMPEG:') || msg.startsWith('FFMPEG SESSION')) {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('main:debugLog', line)
-    }
-  }
 }
 
 function logError(msg) { writeLog(LOG_LEVEL.ERROR, msg) }
@@ -1060,7 +1087,7 @@ function proxyFetch(sessionBaseUrl, sessionHeaders, reqPath, maxRedirects = 20) 
   let targetUrl
   if (reqPath.startsWith('seg/')) {
     const encoded = reqPath.slice(4)
-    try { targetUrl = Buffer.from(encoded, 'base64url').toString('utf8') } catch (_) {}
+    try { targetUrl = fromBase64Url(encoded).toString('utf8') } catch (_) {}
     if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) return Promise.reject(new Error('bad segment URL'))
   } else if (reqPath === 'stream') {
     targetUrl = sessionBaseUrl
@@ -1190,7 +1217,7 @@ function ensureLocalFileServer() {
     localFileServer = http.createServer((req, res) => {
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': safeCorsOrigin(req),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': '*',
         })
@@ -1201,7 +1228,7 @@ function ensureLocalFileServer() {
       const urlPath = req.url || ''
       const match = urlPath.match(/^\/local-file\/([^/]+)/)
       if (!match) {
-        res.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
+        res.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
         res.end('not found')
         return
       }
@@ -1209,7 +1236,7 @@ function ensureLocalFileServer() {
       const token = match[1]
       const session = localFileSessions.get(token)
       if (!session) {
-        res.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
+        res.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
         res.end('session not found')
         return
       }
@@ -1227,7 +1254,7 @@ function ensureLocalFileServer() {
 
       fs.stat(filePath, (statErr, stats) => {
         if (statErr || !stats.isFile()) {
-          res.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
+          res.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
           res.end('file not found')
           return
         }
@@ -1246,7 +1273,7 @@ function ensureLocalFileServer() {
             'Accept-Ranges': 'bytes',
             'Content-Length': chunkSize,
             'Content-Type': contentType,
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': safeCorsOrigin(req),
             'Cache-Control': 'no-cache',
           })
 
@@ -1258,7 +1285,7 @@ function ensureLocalFileServer() {
             'Content-Length': fileSize,
             'Content-Type': contentType,
             'Accept-Ranges': 'bytes',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': safeCorsOrigin(req),
             'Cache-Control': 'no-cache',
           })
 
@@ -1269,7 +1296,7 @@ function ensureLocalFileServer() {
       })
     })
 
-    localFileServer.listen(0, '127.0.0.1', () => {
+    localFileServer.listen(0, '0.0.0.0', () => {
       localFileServerPort = localFileServer.address().port
       logInfo(`LOCAL-FILE-SVR: server on port ${localFileServerPort}`)
       resolve()
@@ -1281,17 +1308,17 @@ function ensureLocalFileServer() {
 function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, redirectsLeft) {
   logVerbose(`STREAM-PIPE: start url=${targetUrl.substring(0, 80)} redirectsLeft=${redirectsLeft}`)
   if (redirectsLeft <= 0) {
-    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('too many redirects') }
+    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end('too many redirects') }
     return
   }
   if (!/^https?:\/\//i.test(targetUrl)) {
-    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
+    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end('bad url') }
     return
   }
 
   let parsed
   try { parsed = new URL(targetUrl) } catch (_) {
-    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
+    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end('bad url') }
     return
   }
 
@@ -1338,7 +1365,7 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
         }
       }
       if (!clientRes.headersSent) {
-        clientRes.writeHead(status >= 400 ? status : 415, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*' })
+        clientRes.writeHead(status >= 400 ? status : 415, { 'Content-Type': ct, 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) })
         clientRes.end()
       }
       return
@@ -1346,7 +1373,7 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
 
     const respHeaders = {
       'Content-Type': ct,
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': safeCorsOrigin(clientReq),
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
     }
@@ -1360,11 +1387,11 @@ function pipeLiveStreamNode(clientReq, clientRes, targetUrl, sessionHeaders, red
 
   req.on('error', (e) => {
     logError(`STREAM-PIPE-NODE error: ${e.message} url=${targetUrl.substring(0, 80)}`)
-    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' }); clientRes.end(e.message) }
+    if (!clientRes.headersSent) { clientRes.writeHead(502, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end(e.message) }
   })
   req.on('timeout', () => {
     req.destroy()
-    if (!clientRes.headersSent) { clientRes.writeHead(504, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('timeout') }
+    if (!clientRes.headersSent) { clientRes.writeHead(504, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end('timeout') }
   })
   req.end()
 }
@@ -1374,7 +1401,7 @@ function pipeLiveStream(clientReq, clientRes, targetUrl, sessionHeaders, redirec
   // Chromium net.request is intentionally NOT used here — it fails on many media
   // servers that use non-standard HTTP (missing CRLF, HTTP/1.0, etc.).
   if (!/^https?:\/\//i.test(targetUrl)) {
-    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); clientRes.end('bad url') }
+    if (!clientRes.headersSent) { clientRes.writeHead(400, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) }); clientRes.end('bad url') }
     return
   }
 
@@ -1390,7 +1417,7 @@ function startProxyServer() {
       logVerbose(`PROXY-SVR: req ${clientReq.method} ${urlPath}`)
       const match = urlPath.match(/^\/session\/([^/]+)\/(.+)$/)
       if (!match) {
-        clientRes.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
+        clientRes.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) })
         clientRes.end('not found')
         return
       }
@@ -1400,14 +1427,14 @@ function startProxyServer() {
       const session = streamSessions.get(sessionId)
 
       if (!session || !session.active) {
-        clientRes.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
+        clientRes.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) })
         clientRes.end('session gone')
         return
       }
 
       if (clientReq.method === 'OPTIONS') {
         clientRes.writeHead(204, {
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': safeCorsOrigin(clientReq),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': '*',
         })
@@ -1422,6 +1449,9 @@ function startProxyServer() {
       }
 
       proxyFetch(session.baseUrl, session.headers, reqPath).then(result => {
+        if (!session.active || !streamSessions.has(sessionId)) {
+          return
+        }
         if (result.isPlaylist) {
           const playlistBaseUrl = result.finalUrl || session.baseUrl
           const rawBody = result.body.toString('utf8')
@@ -1440,7 +1470,7 @@ function startProxyServer() {
           }
           const respHeaders = {
             'Content-Type': 'application/vnd.apple.mpegurl',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': safeCorsOrigin(clientReq),
             'Cache-Control': 'no-cache',
           }
           clientRes.writeHead(result.status || 200, respHeaders)
@@ -1448,7 +1478,7 @@ function startProxyServer() {
         } else {
           const respHeaders = {
             'Content-Type': result.contentType || 'application/octet-stream',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': safeCorsOrigin(clientReq),
             'Cache-Control': 'no-cache',
             'Content-Length': result.body.length,
           }
@@ -1457,14 +1487,15 @@ function startProxyServer() {
         }
       }).catch(err => {
         logError(`PROXY-SVR: fetch error for ${sessionId}: ${err.message}`)
+        if (!session.active || !streamSessions.has(sessionId)) return
         if (!clientRes.headersSent) {
-          clientRes.writeHead(502, { 'Access-Control-Allow-Origin': '*' })
+          clientRes.writeHead(502, { 'Access-Control-Allow-Origin': safeCorsOrigin(clientReq) })
           clientRes.end(err.message)
         }
       })
     })
 
-    proxyServer.listen(0, '127.0.0.1', () => {
+    proxyServer.listen(0, '0.0.0.0', () => {
       proxyPort = proxyServer.address().port
       logInfo(`PROXY-SVR: server on port ${proxyPort}`)
       resolve()
@@ -1486,11 +1517,11 @@ function rewritePlaylistUrls(playlistContent, sessionId, baseUrl) {
     }
 
     if (/^https?:\/\//i.test(trimmed)) {
-      const encoded = Buffer.from(trimmed).toString('base64url')
+      const encoded = toBase64Url(Buffer.from(trimmed))
       result.push(`http://127.0.0.1:${proxyPort}/session/${sessionId}/seg/${encoded}`)
     } else {
       const resolved = resolveUrl(baseUrl, trimmed)
-      const encoded = Buffer.from(resolved).toString('base64url')
+      const encoded = toBase64Url(Buffer.from(resolved))
       result.push(`http://127.0.0.1:${proxyPort}/session/${sessionId}/seg/${encoded}`)
     }
   }
@@ -2005,6 +2036,7 @@ app.whenReady().then(() => {
 
   // --- File Dialog & I/O ---
   ipcMain.handle('dialog:openFile', async (_event, options = {}) => {
+    logInfo('dialog:openFile 收到请求, title=' + (options.title || '') + ', filters=' + JSON.stringify(options.filters?.map(f => f.name) || []))
     const result = await dialog.showOpenDialog(mainWindow, {
       title: options.title || '选择直播源文件',
       filters: options.filters || [
@@ -2013,15 +2045,36 @@ app.whenReady().then(() => {
       ],
       properties: ['openFile']
     })
+    logInfo('dialog:openFile showOpenDialog result: canceled=' + result.canceled + ', filePaths.length=' + (result.filePaths?.length || 0))
     if (result.canceled || result.filePaths.length === 0) return null
     const filePath = result.filePaths[0]
+    logInfo('dialog:openFile selected: ' + filePath)
     try {
       const content = fs.readFileSync(filePath, 'utf8')
       return { filePath, content, fileName: path.basename(filePath) }
     } catch (e) {
-      logError('FILE: openFile read error: ' + e.message)
-      return { error: e.message }
+      // 二进制文件或读取失败 — 仍返回路径供调用方使用
+      logError('dialog:openFile read error (non-text, returning path): ' + e.message)
+      return { filePath, fileName: path.basename(filePath) }
     }
+  })
+
+  // 专门用于选择视频/媒体文件，不读取文件内容
+  ipcMain.handle('dialog:openMediaFile', async (_event, options = {}) => {
+    logInfo('dialog:openMediaFile 收到请求, title=' + (options.title || ''))
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: options.title || '选择媒体文件',
+      filters: options.filters || [
+        { name: '媒体文件', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts'] },
+        { name: '所有文件', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+    logInfo('dialog:openMediaFile showOpenDialog result: canceled=' + result.canceled + ', filePaths.length=' + (result.filePaths?.length || 0))
+    if (result.canceled || result.filePaths.length === 0) return null
+    const filePath = result.filePaths[0]
+    logInfo('dialog:openMediaFile selected: ' + filePath)
+    return { filePath, fileName: path.basename(filePath) }
   })
 
   ipcMain.handle('dialog:saveFile', async (_event, options = {}) => {
@@ -2442,6 +2495,924 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
     }
   })
 
+  // --- TVLive 1.1 专用投屏 ---
+
+  let cachedTVLiveDevices = []
+
+  ipcMain.handle('tlv1-discover', async (_event, opts) => {
+    try {
+      const expanded = !!(opts && opts.expanded)
+      const devices = await tvlive.discoverTVLiveDevices(expanded ? 60000 : 30000, { expanded })
+      cachedTVLiveDevices = devices
+      logInfo('TVLive: discovered ' + devices.length + ' device(s), expanded=' + expanded)
+      return { success: true, devices }
+    } catch (e) {
+      logError('TVLive: discover error: ' + e.message)
+      return { success: false, error: e.message, devices: [] }
+    }
+  })
+
+  ipcMain.handle('tlv1-cast', async (_event, deviceIndex, videoUrl, options) => {
+    const { format = 'auto', quality = 'original', position = 0 } = options || {}
+    const useHls = format !== 'mpegts'
+    const needReencode = quality !== 'original'
+    let child = null
+    let mirrorServer = null
+    let mirrorPort = 0
+    let sessionId = generateId()
+    try {
+      const devices = cachedTVLiveDevices.length > 0
+        ? cachedTVLiveDevices
+        : await tvlive.discoverTVLiveDevices()
+      if (deviceIndex < 0 || deviceIndex >= devices.length) {
+        return { success: false, error: 'Device not found' }
+      }
+      const device = devices[deviceIndex]
+
+      const pcIps = tvlive.getLocalIpAddresses()
+      let lanIp = '127.0.0.1'
+      let isEmulatorDevice = false
+
+      if (device.host === '127.0.0.1' || device.isEmulator) {
+        // 模拟器通过ADB转发连接，稍后使用adb reverse让模拟器访问PC镜像服务器
+        isEmulatorDevice = true
+        lanIp = '127.0.0.1'
+      } else {
+        for (const ip of pcIps) {
+          if (tvlive.isSameSubnet(ip, device.host)) {
+            lanIp = ip
+            break
+          }
+        }
+      }
+      if (lanIp === '127.0.0.1' && !isEmulatorDevice) {
+        const LAN_PREFERENCE = [
+          /^192\.168\./,
+          /^10\./,
+          /^172\.(1[6-9]|2\d|3[01])\./,
+        ]
+        for (const pref of LAN_PREFERENCE) {
+          const found = pcIps.find(ip => pref.test(ip))
+          if (found) { lanIp = found; break }
+        }
+        if (lanIp === '127.0.0.1' && pcIps.length > 0) {
+          lanIp = pcIps[0]
+        }
+      }
+
+      if (!cachedFFmpegPath) {
+        try {
+          const exts = process.platform === 'win32' ? ['', '.exe'] : ['']
+          for (const ext of exts) {
+            try {
+              const p = path.join(process.resourcesPath, 'ffmpeg' + ext)
+              if (fs.existsSync(p)) { cachedFFmpegPath = p; break }
+            } catch (_) {}
+          }
+          if (!cachedFFmpegPath) {
+            try {
+              const result = await new Promise((res) => {
+                execFile('where', ['ffmpeg'], { timeout: 3000 }, (e, stdout) => {
+                  if (!e && stdout) res(stdout.trim().split('\n')[0])
+                  else res(null)
+                })
+              })
+              if (result) cachedFFmpegPath = result
+            } catch (_) {}
+          }
+        } catch (_) {}
+        if (!cachedFFmpegPath) {
+          return { success: false, error: 'FFmpeg未找到，请先在悬浮窗中设置FFmpeg路径' }
+        }
+      }
+
+      const ffmpegPath = cachedFFmpegPath
+
+      let inputUrl = videoUrl
+      let isLocalFile = false
+      if (videoUrl.startsWith('file://')) {
+        let fp = decodeURIComponent(videoUrl.replace(/^file:\/\//, ''))
+        if (fp.startsWith('/') && fp.length > 2 && fp.charAt(2) === ':') fp = fp.substring(1)
+        inputUrl = fp
+        isLocalFile = true
+      } else if (/^[A-Za-z]:[/\\]/.test(videoUrl)) {
+        inputUrl = videoUrl
+        isLocalFile = true
+      }
+
+      const networkArgs = isLocalFile ? [
+        '-analyzeduration', '100000000', '-probesize', '50000000',
+      ] : [
+        '-reconnect', '1', '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '10', '-timeout', '15000000',
+        '-rtbufsize', '16M',
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      ]
+
+      const qualityScale = { '1080p': 1080, '720p': 720, '480p': 480, '360p': 360 }
+
+      const hlsDir = useHls ? fs.mkdtempSync(path.join(os.tmpdir(), 'tlv-hls-')) : null
+      const playlistFile = useHls ? path.join(hlsDir, 'playlist.m3u8') : null
+
+      const videoCodecArgs = needReencode
+        ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-vf', `scale=-2:${qualityScale[quality] || 720}`]
+        : ['-c:v', 'copy', '-bsf:v', 'h264_mp4toannexb']
+
+      const extraVideoArgs = needReencode
+        ? ['-preset', 'ultrafast', '-crf', '23', '-vf', `scale=-2:${qualityScale[quality] || 720}`]
+        : ['-bsf:v', 'h264_mp4toannexb']
+
+      // -ss 仅对本地文件有效，网络直播流无法seek，跳过
+      const seekArgs = (isLocalFile && position > 0) ? ['-ss', String(position)] : []
+      const rawArgs = [
+        '-fflags', '+genpts+discardcorrupt',
+        '-avoid_negative_ts', 'make_zero',
+        ...networkArgs,
+        ...seekArgs,
+        '-i', inputUrl,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        ...videoCodecArgs,
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      ]
+
+      // 本地文件=VOD模式(keep all segments + ENDLIST)
+      // 网络流=LIVE模式(sliding window + omit_endlist)
+      let ffArgs
+      if (useHls) {
+        if (isLocalFile) {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '0',
+            '-hls_segment_filename', path.join(hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        } else {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '6',
+            '-hls_flags', 'omit_endlist',
+            '-hls_segment_filename', path.join(hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        }
+      } else {
+        ffArgs = [
+          ...rawArgs,
+          '-f', 'mpegts',
+          '-',
+        ]
+      }
+
+      child = spawn(ffmpegPath, ffArgs, {
+        stdio: ['ignore', useHls ? 'pipe' : 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+
+      let stderrAcc = ''
+      let ffmpegExited = false
+
+      child.stderr.on('data', (d) => {
+        const txt = d.toString()
+        stderrAcc += txt
+        if (stderrAcc.length > 8192) stderrAcc = stderrAcc.slice(-4096)
+      })
+
+      child.on('error', (err) => {
+        logError(`TVLive: ffmpeg spawn error: ${err.message}`)
+        ffmpegExited = true
+      })
+
+      child.on('exit', (code) => {
+        ffmpegExited = true
+        logInfo(`TVLive: ffmpeg ${useHls ? 'HLS' : 'MPEG-TS'} session ${sessionId} exited code=${code}`)
+        if (stderrAcc) {
+          logError(`TVLive: ffmpeg stderr tail: ${stderrAcc.slice(-500)}`)
+        }
+        // mirrorServer 保持运行 — TV端VOD模式会自然播完(ENDLIST)，LIVE模式等待用户手动停止
+        // 资源清理统一由 tlv1-stop handler 和 session 替换时处理
+      })
+
+      if (useHls) {
+        // ======== HLS 静态文件服务器 ========
+        const mimeTypes = {
+          '.m3u8': 'application/vnd.apple.mpegurl',
+          '.ts': 'video/mp2t',
+        }
+
+                mirrorServer = http.createServer(async (req, res) => {
+          const clientIp = req.socket.remoteAddress
+          const reqPath = (req.url || '/').split('?')[0]
+          const fileName = reqPath === '/' ? 'playlist.m3u8' : path.basename(reqPath)
+          const filePath = path.join(hlsDir, fileName)
+
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': safeCorsOrigin(req),
+              'Access-Control-Allow-Methods': 'GET, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            })
+            res.end()
+            return
+          }
+
+          const ext = path.extname(fileName).toLowerCase()
+
+          if (!fs.existsSync(filePath)) {
+            if (ext === '.m3u8') {
+              const deadline = Date.now() + 5000
+              let ready = false
+              while (Date.now() < deadline && !ffmpegExited) {
+                if (fs.existsSync(filePath)) { ready = true; break }
+                await new Promise(r => setTimeout(r, 200))
+              }
+              if (ready) {
+                logInfo(`TVLive: HLS playlist ready after ${((Date.now() - deadline + 5000) / 1000).toFixed(1)}s wait`)
+              } else {
+                logWarn(`TVLive: HLS playlist still not ready after 5s timeout for ${clientIp}`)
+              }
+            }
+            if (!fs.existsSync(filePath)) {
+              logWarn(`TVLive: HLS file not ready: ${fileName} for ${clientIp}`)
+              res.writeHead(404, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
+              res.end('not ready')
+              return
+            }
+          }
+
+          const contentType = mimeTypes[ext] || 'application/octet-stream'
+
+          try {
+            const stat = fs.statSync(filePath)
+            const cacheControl = ext === '.m3u8' ? 'no-cache' : 'public, max-age=5'
+
+            res.writeHead(200, {
+              'Content-Type': contentType,
+              'Content-Length': stat.size,
+              'Access-Control-Allow-Origin': safeCorsOrigin(req),
+              'Cache-Control': cacheControl,
+            })
+
+            const stream = fs.createReadStream(filePath)
+            stream.pipe(res)
+            stream.on('error', () => { try { res.end() } catch (_) {} })
+            req.on('close', () => { stream.destroy() })
+          } catch (e) {
+            logError(`TVLive: HLS serve error: ${e.message}`)
+            try { res.writeHead(500, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) }) } catch (_) {}
+            try { res.end('internal error') } catch (_) {}
+          }
+        })
+      } else {
+        // ======== MPEG-TS 管道流服务器 ========
+        const clients = new Set()
+        const preBuffer = []
+
+        child.stdout.on('data', (chunk) => {
+          preBuffer.push(chunk)
+          for (const client of clients) {
+            try { client.write(chunk) } catch (_) { clients.delete(client) }
+          }
+          while (preBuffer.reduce((s, c) => s + c.length, 0) > 512 * 1024) {
+            preBuffer.shift()
+          }
+        })
+
+        mirrorServer = http.createServer((req, res) => {
+          const clientIp = req.socket.remoteAddress
+
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': safeCorsOrigin(req),
+              'Access-Control-Allow-Methods': 'GET, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            })
+            res.end()
+            return
+          }
+
+          if (ffmpegExited && preBuffer.length === 0 && (!child.stdout || child.stdout.destroyed)) {
+            logWarn(`TVLive: MPEG-TS stream unavailable for ${clientIp}`)
+            res.writeHead(503, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
+            res.end('stream unavailable')
+            return
+          }
+
+          const preBufLen = preBuffer.reduce((s, c) => s + c.length, 0)
+          logInfo(`TVLive: MPEG-TS serving to ${clientIp} clients=${clients.size + 1} preBuffer=${preBufLen}bytes`)
+
+          res.writeHead(200, {
+            'Content-Type': 'video/mp2t',
+            'Access-Control-Allow-Origin': safeCorsOrigin(req),
+            'Cache-Control': 'no-cache',
+          })
+
+          for (const chunk of preBuffer) res.write(chunk)
+          clients.add(res)
+          req.on('close', () => {
+            clients.delete(res)
+          })
+        })
+      }
+
+      mirrorPort = await new Promise((resolveProxy, rejectProxy) => {
+        mirrorServer.listen(0, '0.0.0.0', () => {
+          resolveProxy(mirrorServer.address().port)
+        })
+        mirrorServer.on('error', rejectProxy)
+        setTimeout(() => rejectProxy(new Error('mirror server start timeout')), 5000)
+      })
+
+      // 模拟器设备：建立ADB反向转发，让模拟器内127.0.0.1:{mirrorPort} → PC {mirrorPort}
+      if (isEmulatorDevice) {
+        try {
+          const reverseResult = await tvlive.setupAdbReverse(mirrorPort)
+          if (reverseResult.success) {
+            logInfo(`TVLive: ADB反向转发建立成功 (${reverseResult.serial})，模拟器访问 127.0.0.1:${mirrorPort}`)
+          } else {
+            logError(`TVLive: ADB反向转发失败: ${reverseResult.error}，模拟器可能无法访问镜像流`)
+          }
+        } catch (e) {
+          logError(`TVLive: ADB反向转发异常: ${e.message}`)
+        }
+      }
+
+      const proxyUrl = useHls
+        ? `http://${lanIp}:${mirrorPort}/playlist.m3u8`
+        : `http://${lanIp}:${mirrorPort}/stream`
+
+      ffmpegSessions.set(sessionId, {
+        active: true,
+        proc: child,
+        server: mirrorServer,
+        sessionId,
+        hlsDir: hlsDir || undefined,
+        // 供 tlv1-seek 重启 FFmpeg 使用
+        isLocalFile,
+        useHls,
+        needReencode,
+        quality,
+        ffmpegPath,
+        inputUrl,
+        lanIp,
+        mirrorPort,
+        device,
+        isEmulatorDevice,
+        codec: needReencode ? 'libx264' : 'copy',
+        extraVideoArgs,
+        networkArgs,
+      })
+
+      logInfo(`TVLive: cast ${useHls ? 'HLS' : 'MPEG-TS'} ${needReencode ? quality : '原画'} ${proxyUrl} to ${device.deviceName} (${device.host})`)
+
+      await tvlive.castToTVLiveDevice(device, proxyUrl)
+      logInfo(`TVLive: cast SUCCESS to device[${deviceIndex}] (${device.deviceName})`)
+      return { success: true, sessionId, proxyUrl }
+    } catch (e) {
+      logError('TVLive: cast error: ' + e.message)
+      try { child.kill('SIGTERM') } catch (_) {}
+      try { mirrorServer.close() } catch (_) {}
+      if (hlsDir) try { fs.rmSync(hlsDir, { recursive: true, force: true }) } catch (_) {}
+      if (ffmpegSessions.has(sessionId)) ffmpegSessions.delete(sessionId)
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('tlv1-stop', async (_event, deviceIndex, sessionId) => {
+    try {
+      const devices = cachedTVLiveDevices.length > 0
+        ? cachedTVLiveDevices
+        : await tvlive.discoverTVLiveDevices()
+      if (deviceIndex >= 0 && deviceIndex < devices.length) {
+        await tvlive.stopTVLiveDevice(devices[deviceIndex])
+        logInfo('TVLive: stop device[' + deviceIndex + ']')
+      }
+      if (sessionId && ffmpegSessions.has(sessionId)) {
+        const sess = ffmpegSessions.get(sessionId)
+        try { sess.proc.kill('SIGTERM') } catch (_) {}
+        try { sess.server.close() } catch (_) {}
+        if (sess.hlsDir) {
+          setTimeout(() => {
+            try { fs.rmSync(sess.hlsDir, { recursive: true, force: true }) } catch (_) {}
+          }, 3000)
+        }
+        sess.active = false
+        ffmpegSessions.delete(sessionId)
+      }
+      return { success: true }
+    } catch (e) {
+      logError('TVLive: stop error: ' + e.message)
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('tlv1-pause', async (_event, _deviceIndex, sessionId, currentPosition) => {
+    try {
+      if (!sessionId || !ffmpegSessions.has(sessionId)) {
+        return { success: false, error: 'session not found' }
+      }
+      const sess = ffmpegSessions.get(sessionId)
+      if (!sess.active) return { success: true, message: 'already paused' }
+
+      // 保存暂停位置
+      sess.pausedPosition = typeof currentPosition === 'number' ? Math.round(currentPosition) : 0
+      sess.active = false
+
+      // 杀死 FFmpeg，保留 mirrorServer 和 hlsDir
+      try { sess.proc.kill('SIGTERM') } catch (_) {}
+
+      // 通知TV端停止播放
+      try { await tvlive.stopTVLiveDevice(sess.device) } catch (_) {}
+
+      logInfo(`TVLive: paused session ${sessionId} at ${sess.pausedPosition}s`)
+      return { success: true }
+    } catch (e) {
+      logError('TVLive: pause error: ' + e.message)
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('tlv1-resume', async (_event, deviceIndex, _unused, sessionId) => {
+    try {
+      if (!sessionId || !ffmpegSessions.has(sessionId)) {
+        return { success: false, error: 'session not found' }
+      }
+      const sess = ffmpegSessions.get(sessionId)
+      if (sess.active) return { success: true, message: 'already active' }
+
+      const newPos = sess.pausedPosition || 0
+      logInfo(`TVLive: resume session ${sessionId} from ${newPos}s`)
+
+      // 重建 FFmpeg 进程（复用已有的 server / hlsDir / ffmpegPath / inputUrl）
+      const seekArgs = (sess.isLocalFile && newPos > 0) ? ['-ss', String(newPos)] : []
+      const rawArgs = [
+        '-loglevel', 'error',
+        '-fflags', '+genpts+discardcorrupt',
+        '-avoid_negative_ts', 'make_zero',
+        ...sess.networkArgs,
+        ...seekArgs,
+        '-i', sess.inputUrl,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c:v', sess.codec,
+        ...sess.extraVideoArgs,
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      ]
+
+      let ffArgs
+      let newChild = null
+      let newServer = null
+
+      if (sess.useHls) {
+        // 清理 HLS 旧分片
+        if (sess.hlsDir) {
+          try {
+            const oldFiles = fs.readdirSync(sess.hlsDir)
+            for (const f of oldFiles) {
+              if (f.endsWith('.ts') || f.endsWith('.m3u8')) {
+                try { fs.unlinkSync(path.join(sess.hlsDir, f)) } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        }
+
+        const playlistFile = path.join(sess.hlsDir, 'playlist.m3u8')
+        if (sess.isLocalFile) {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls', '-hls_time', '2',
+            '-hls_list_size', '0',
+            '-hls_segment_filename', path.join(sess.hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        } else {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls', '-hls_time', '2',
+            '-hls_list_size', '6', '-hls_flags', 'omit_endlist',
+            '-hls_segment_filename', path.join(sess.hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        }
+        newChild = spawn(sess.ffmpegPath, ffArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        })
+        newChild.stderr.on('data', () => {})
+        newChild.on('exit', (code) => {
+          logInfo(`TVLive: resumed ffmpeg(HLS) exited code=${code} (sessionId=${sessionId})`)
+        })
+        newChild.on('error', (err) => {
+          logError(`TVLive: resumed ffmpeg(HLS) error: ${err.message}`)
+        })
+        sess.proc = newChild
+      } else {
+        // MPEG-TS 模式：重建管道服务器
+        ffArgs = [...rawArgs, '-f', 'mpegts', '-']
+        newChild = spawn(sess.ffmpegPath, ffArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        })
+
+        try { sess.server.close() } catch (_) {}
+
+        const tsClients = new Set()
+        const tsPreBuffer = []
+        let tsExited = false
+
+        newChild.stdout.on('data', (chunk) => {
+          tsPreBuffer.push(chunk)
+          for (const client of tsClients) {
+            try { client.write(chunk) } catch (_) { tsClients.delete(client) }
+          }
+          while (tsPreBuffer.reduce((s, c) => s + c.length, 0) > 512 * 1024) {
+            tsPreBuffer.shift()
+          }
+        })
+        newChild.stderr.on('data', () => {})
+        newChild.on('exit', (code) => {
+          tsExited = true
+          logInfo(`TVLive: resumed ffmpeg(MPEG-TS) exited code=${code} (sessionId=${sessionId})`)
+        })
+        newChild.on('error', (err) => {
+          logError(`TVLive: resumed ffmpeg(MPEG-TS) error: ${err.message}`)
+        })
+
+        newServer = http.createServer((req, res) => {
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': safeCorsOrigin(req), 'Access-Control-Allow-Methods': 'GET, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            })
+            res.end()
+            return
+          }
+          if (tsExited && tsPreBuffer.length === 0 && (!newChild.stdout || newChild.stdout.destroyed)) {
+            res.writeHead(503, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
+            res.end('stream unavailable')
+            return
+          }
+          res.writeHead(200, {
+            'Content-Type': 'video/mp2t', 'Access-Control-Allow-Origin': safeCorsOrigin(req),
+            'Cache-Control': 'no-cache',
+          })
+          for (const chunk of tsPreBuffer) res.write(chunk)
+          tsClients.add(res)
+          req.on('close', () => { tsClients.delete(res) })
+        })
+        sess.mirrorPort = 0
+        newServer.listen(0, '0.0.0.0', () => {
+          sess.mirrorPort = newServer.address().port
+        })
+        // Wait for server to bind
+        await new Promise((resolveListen) => {
+          let waited = false
+          const check = setInterval(() => {
+            if (sess.mirrorPort !== 0) {
+              clearInterval(check)
+              if (!waited) { waited = true; resolveListen() }
+            }
+          }, 100)
+          setTimeout(() => { clearInterval(check); if (!waited) { waited = true; resolveListen() } }, 5000)
+        })
+        sess.proc = newChild
+        sess.server = newServer
+      }
+
+      // 等待 FFmpeg 准备好
+      await new Promise(r => setTimeout(r, 800))
+
+      // 构造 URL 并推送到 TV 设备
+      const proxyUrl = sess.useHls
+        ? `http://${sess.lanIp}:${sess.mirrorPort}/playlist.m3u8`
+        : `http://${sess.lanIp}:${sess.mirrorPort}/stream`
+
+      await tvlive.castToTVLiveDevice(sess.device, proxyUrl)
+      sess.active = true
+      logInfo(`TVLive: resumed SUCCESS session ${sessionId} url=${proxyUrl}`)
+      return { success: true, sessionId, proxyUrl }
+    } catch (e) {
+      logError('TVLive: resume error: ' + e.message)
+      try { if (newChild) newChild.kill('SIGTERM') } catch (_) {}
+      try { if (newServer) newServer.close() } catch (_) {}
+      const sess = ffmpegSessions.get(sessionId)
+      if (sess) sess.active = false
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('tlv1-get-subnets', async () => {
+    try {
+      const subnets = tvlive.getLocalSubnets()
+      return { success: true, subnets }
+    } catch (e) {
+      return { success: false, error: e.message, subnets: [] }
+    }
+  })
+
+  ipcMain.handle('tlv1-get-local-ips', async () => {
+    try {
+      const ips = tvlive.getLocalIpAddresses()
+      return { success: true, ips }
+    } catch (e) {
+      return { success: false, error: e.message, ips: [] }
+    }
+  })
+
+  ipcMain.handle('tlv1-emulator-status', async () => {
+    try {
+      const status = await tvlive.getEmulatorStatus()
+      return { success: true, ...status }
+    } catch (e) {
+      return { success: false, error: e.message, available: false }
+    }
+  })
+
+  // PC → TV 播放跳转同步：重启 FFmpeg 从新位置编码
+  ipcMain.handle('tlv1-seek', async (_event, _deviceIndex, positionSec, sessionId) => {
+    try {
+      if (!sessionId || !ffmpegSessions.has(sessionId)) {
+        return { success: false, error: 'session not found' }
+      }
+      const sess = ffmpegSessions.get(sessionId)
+      if (!sess || !sess.active || !sess.device) {
+        return { success: false, error: 'session inactive' }
+      }
+
+      // 网络流不支持 seek（源不可定位）
+      if (!sess.isLocalFile) {
+        logInfo(`TVLive: seek skipped — network stream cannot be restarted with -ss (sessionId=${sessionId})`)
+        return { success: true }
+      }
+
+      const newPos = Math.round(positionSec)
+      logInfo(`TVLive: seek restart FFmpeg from ${newPos}s (sessionId=${sessionId})`)
+
+      // 1. 杀掉旧 FFmpeg 进程
+      try { sess.proc.kill('SIGTERM') } catch (_) { /* 忽略 */ }
+
+      // 2. 清理 HLS 旧分片
+      if (sess.hlsDir) {
+        try {
+          const oldFiles = fs.readdirSync(sess.hlsDir)
+          for (const f of oldFiles) {
+            if (f.endsWith('.ts') || f.endsWith('.m3u8')) {
+              try { fs.unlinkSync(path.join(sess.hlsDir, f)) } catch (_) { /* 忽略 */ }
+            }
+          }
+        } catch (_) { /* 忽略 */ }
+      }
+
+      // 3. 构建新的 FFmpeg 参数（仅 -ss 不同，其余与首次投屏 rawArgs 一致）
+      const seekArgs = (sess.isLocalFile && newPos > 0) ? ['-ss', String(newPos)] : []
+      const rawArgs = [
+        '-loglevel', 'error',
+        '-fflags', '+genpts+discardcorrupt',
+        '-avoid_negative_ts', 'make_zero',
+        ...sess.networkArgs,
+        ...seekArgs,
+        '-i', sess.inputUrl,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c:v', sess.codec,
+        ...sess.extraVideoArgs,
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      ]
+
+      const useHls = sess.useHls
+      let ffArgs
+      let newChild
+
+      if (useHls) {
+        // ======== HLS 模式：复用已有服务器，仅重启 FFmpeg ========
+        const playlistFile = path.join(sess.hlsDir, 'playlist.m3u8')
+        if (sess.isLocalFile) {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls', '-hls_time', '2',
+            '-hls_list_size', '0',
+            '-hls_segment_filename', path.join(sess.hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        } else {
+          ffArgs = [
+            ...rawArgs,
+            '-f', 'hls', '-hls_time', '2',
+            '-hls_list_size', '6', '-hls_flags', 'omit_endlist',
+            '-hls_segment_filename', path.join(sess.hlsDir, 'seg_%03d.ts'),
+            playlistFile,
+          ]
+        }
+        newChild = spawn(sess.ffmpegPath, ffArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        })
+        newChild.stderr.on('data', () => { /* 静默消费 */ })
+        newChild.on('exit', (code) => {
+          logInfo(`TVLive: seek-restarted ffmpeg(HLS) exited code=${code} (sessionId=${sessionId})`)
+        })
+        newChild.on('error', (err) => {
+          logError(`TVLive: seek-restarted ffmpeg(HLS) error: ${err.message}`)
+        })
+        sess.proc = newChild
+        // 服务器保持不变，新 FFmpeg 写入同一 hlsDir
+      } else {
+        // ======== MPEG-TS 模式：必须重建服务器+FFmpeg（管道绑定） ========
+        ffArgs = [...rawArgs, '-f', 'mpegts', '-']
+        newChild = spawn(sess.ffmpegPath, ffArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        })
+
+        // 关闭旧服务器
+        try { sess.server.close() } catch (_) { /* 忽略 */ }
+
+        // 重建 MPEG-TS 管道服务器
+        const tsClients = new Set()
+        const tsPreBuffer = []
+        let tsExited = false
+
+        newChild.stdout.on('data', (chunk) => {
+          tsPreBuffer.push(chunk)
+          for (const client of tsClients) {
+            try { client.write(chunk) } catch (_) { tsClients.delete(client) }
+          }
+          while (tsPreBuffer.reduce((s, c) => s + c.length, 0) > 512 * 1024) {
+            tsPreBuffer.shift()
+          }
+        })
+
+        newChild.stderr.on('data', () => { /* 静默消费 */ })
+        newChild.on('exit', (code) => {
+          tsExited = true
+          logInfo(`TVLive: seek-restarted ffmpeg(MPEG-TS) exited code=${code} (sessionId=${sessionId})`)
+        })
+        newChild.on('error', (err) => {
+          logError(`TVLive: seek-restarted ffmpeg(MPEG-TS) error: ${err.message}`)
+        })
+
+        const newServer = http.createServer((req, res) => {
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': safeCorsOrigin(req), 'Access-Control-Allow-Methods': 'GET, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            })
+            res.end()
+            return
+          }
+          if (tsExited && tsPreBuffer.length === 0 && (!newChild.stdout || newChild.stdout.destroyed)) {
+            res.writeHead(503, { 'Access-Control-Allow-Origin': safeCorsOrigin(req) })
+            res.end('stream unavailable')
+            return
+          }
+          res.writeHead(200, {
+            'Content-Type': 'video/mp2t',
+            'Access-Control-Allow-Origin': safeCorsOrigin(req), 'Cache-Control': 'no-cache',
+          })
+          for (const chunk of tsPreBuffer) res.write(chunk)
+          tsClients.add(res)
+          req.on('close', () => { tsClients.delete(res) })
+        })
+
+        // 尽量复用原端口，失败则换新端口
+        const newPort = await new Promise((resolveProxy) => {
+          newServer.on('error', () => {
+            newServer.listen(0, '0.0.0.0', () => resolveProxy(newServer.address().port))
+          })
+          newServer.listen(sess.mirrorPort, '0.0.0.0', () => resolveProxy(newServer.address().port))
+          setTimeout(() => resolveProxy(0), 5000)
+        })
+        if (newPort === 0) {
+          try { newChild.kill('SIGTERM') } catch (_) { /* 忽略 */ }
+          try { newServer.close() } catch (_) { /* 忽略 */ }
+          return { success: false, error: 'MPEG-TS server restart timeout' }
+        }
+        if (newPort !== sess.mirrorPort) {
+          logInfo(`TVLive: MPEG-TS seek server port changed ${sess.mirrorPort} → ${newPort}`)
+          sess.mirrorPort = newPort
+        }
+        sess.proc = newChild
+        sess.server = newServer
+      }
+
+      // 6. 通知 TV 重新加载流（stop + push）
+      const proxyUrl = useHls
+        ? `http://${sess.lanIp}:${sess.mirrorPort}/playlist.m3u8`
+        : `http://${sess.lanIp}:${sess.mirrorPort}/stream`
+
+      try {
+        await tvlive.stopTVLiveDevice(sess.device)
+      } catch (_) { /* stop 可能失败（TV 已断开），忽略 */ }
+
+      // 短暂延迟让 TV 释放旧播放器
+      await new Promise(r => setTimeout(r, 800))
+
+      try {
+        await tvlive.castToTVLiveDevice(sess.device, proxyUrl)
+      } catch (e) {
+        logError(`TVLive: seek re-push failed: ${e.message}`)
+        return { success: false, error: `re-push failed: ${e.message}` }
+      }
+
+      logInfo(`TVLive: seek restart SUCCESS from ${newPos}s (sessionId=${sessionId})`)
+      return { success: true }
+    } catch (e) {
+      logError('TVLive: seek error: ' + e.message)
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('tlv1-emulator-forward', async () => {
+    try {
+      const result = await tvlive.setupEmulatorForwarding()
+      return { success: true, ...result }
+    } catch (e) {
+      return { success: false, error: e.message, setup: false }
+    }
+  })
+
+  ipcMain.handle('tlv1-connect', async (_event, ip) => {
+    try {
+      const device = await tvlive.connectToIP(ip)
+      // 同步到后端缓存，确保前后端deviceIndex一致
+      const existIdx = cachedTVLiveDevices.findIndex(d =>
+        (d.host === device.host) || (d.displayHost === device.host) || (d.host === device.displayHost)
+      )
+      if (existIdx >= 0) {
+        cachedTVLiveDevices[existIdx] = device
+      } else {
+        cachedTVLiveDevices.unshift(device)
+      }
+      return { success: true, device }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // --- ADB 路径管理 ---
+  ipcMain.handle('tlv1-select-adb', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 ADB 可执行文件',
+      filters: [
+        { name: 'ADB 可执行文件 (adb.exe)', extensions: ['exe'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, path: '' }
+    }
+    const adbPath = result.filePaths[0]
+    // 校验是否为有效 ADB
+    const testResult = await tvlive.testAdbPath(adbPath)
+    if (testResult.success) {
+      tvlive.setAdbPath(adbPath)
+      logInfo('TVLive: 手动指定ADB: ' + adbPath + ' (v' + testResult.version + ')')
+      return { success: true, path: adbPath, version: testResult.version }
+    } else {
+      return { success: false, path: '', error: '所选文件不是有效的ADB: ' + (testResult.error || '无法执行') }
+    }
+  })
+
+  ipcMain.handle('tlv1-set-adb-path', async (_event, adbPath) => {
+    if (adbPath && adbPath.trim()) {
+      const testResult = await tvlive.testAdbPath(adbPath)
+      if (testResult.success) {
+        tvlive.setAdbPath(adbPath)
+        logInfo('TVLive: ADB路径已设置: ' + adbPath)
+        return { success: true }
+      } else {
+        return { success: false, error: testResult.error || '无效的ADB路径' }
+      }
+    } else {
+      tvlive.setAdbPath(null)
+      logInfo('TVLive: ADB路径已清除，恢复自动检测')
+      return { success: true }
+    }
+  })
+
+  ipcMain.handle('tlv1-get-adb-path', async () => {
+    const adbPath = tvlive.getAdbPath()
+    const isOverride = tvlive.isAdbOverridden()
+    return { success: true, path: adbPath, isOverride }
+  })
+
+  ipcMain.handle('tlv1-sync-local-channels', async (_event, deviceIndex, channelsData) => {
+    try {
+      const devices = cachedTVLiveDevices.length > 0
+        ? cachedTVLiveDevices
+        : await tvlive.discoverTVLiveDevices()
+      if (deviceIndex < 0 || deviceIndex >= devices.length) {
+        logError(`TVLive sync-local-channels: invalid deviceIndex ${deviceIndex}`)
+        return { success: false, error: '设备索引无效' }
+      }
+      const device = devices[deviceIndex]
+      const result = await tvlive.syncLocalChannelsToDevice(device, channelsData)
+      logInfo(`TVLive sync-local-channels: 同步完成 ${device.deviceName} count=${result.count}`)
+      return { success: true, count: result.count }
+    } catch (e) {
+      logError(`TVLive sync-local-channels: ${e.message}`)
+      return { success: false, error: e.message }
+    }
+  })
+
   // --- Float Window (PiP) ---
   ipcMain.handle('create-float-window', async (_event, videoInfo) => {
     try {
@@ -2524,6 +3495,12 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
 
   ipcMain.handle('float-window-exists', async () => {
     return !!(floatWindow && !floatWindow.isDestroyed())
+  })
+
+  ipcMain.handle('toggle-float-fullscreen', async () => {
+    if (floatWindow && !floatWindow.isDestroyed()) {
+      floatWindow.setFullScreen(!floatWindow.isFullScreen())
+    }
   })
 
   // --- Mirror Signal Relay (WebRTC signaling between main window and float window) ---
@@ -2633,6 +3610,10 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         if (freshUrlSet.length > 0) phase = phase ? phase + '+fresh' : 'fresh'
       } catch (_) { logWarn('SNIFF: fresh URL generation failed for site=' + (deepMetadata?.site || '?') + ' page=' + pageUrl.substring(0, 60)) }
     }
+    if (deepSession) {
+      try { deepSession.close() } catch (_) {}
+      deepSession = null
+    }
 
     if (seenUrls.size === 0) {
       return {
@@ -2707,6 +3688,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   // ============ FFmpeg IPC handlers ============
   const { spawn, execFile } = require('child_process')
   const ffmpegSessions = new Map()
+  let cachedFFmpegPath = null
 
   function probeDuration(ffprobePath, filePath) {
     return new Promise((resolve) => {
@@ -2764,6 +3746,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   })
 
   ipcMain.handle('ffmpeg:createSession', async (_event, sourceUrl, headers, ffmpegPath, seekTime, inputFormat) => {
+    cachedFFmpegPath = ffmpegPath
     logDebug(`IPC ffmpeg:createSession: src=${(sourceUrl||'').substring(0, 80)} seek=${seekTime||0} fmt=${inputFormat||'auto'}`)
     const sessionId = generateId()
 
@@ -2791,7 +3774,6 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
         logError(`FFMPEG: local file NOT accessible: ${inputUrl} - ${e.message}`)
         return { success: false, error: `File not accessible: ${inputUrl} - ${e.message}` }
       }
-      // 用 FFprobe 提前获取真实时长，因为 fMP4 输出到 stdout 管道时 mehd.fragment_duration 永远为 0
       const ffprobePath = path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe')
       probedDuration = await probeDuration(ffprobePath, inputUrl)
     }
@@ -2820,9 +3802,7 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       '-rtbufsize', '16M',
     ]
 
-    // 统一使用 frag_keyframe+default_base_moof（带 codec 信息的 moov），
-    // 去掉 empty_moov —— 浏览器 video 元素的渐进下载需要 moov 里有完整编码器信息才能持续播放
-    const movFlags = 'frag_keyframe+default_base_moof'
+    const movFlags = 'frag_keyframe+empty_moov+default_base_moof'
 
     const inputFormatArgs = []
     if (!isLocalFile && typeof inputFormat === 'string' && inputFormat) {
@@ -2830,14 +3810,22 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
       const ffFmt = fmtMap[inputFormat.toLowerCase()] || inputFormat
       inputFormatArgs.push('-f', ffFmt)
     }
+
+    const seekInputArgs = (isLocalFile && typeof seekTime === 'number' && seekTime > 0)
+      ? ['-ss', String(seekTime)]
+      : []
+
     const ffmpegArgs = [
+      '-fflags', '+genpts+discardcorrupt',
+      '-avoid_negative_ts', 'make_zero',
       ...headerArgs,
       ...networkArgs,
-      ...(isLocalFile && typeof seekTime === 'number' && seekTime > 0 ? ['-ss', String(seekTime)] : []),
+      ...seekInputArgs,
       ...inputFormatArgs,
       '-i', inputUrl,
+      '-map', '0:v:0', '-map', '0:a:0?',
       '-c:v', 'copy',
-      '-c:a', 'copy',
+      '-c:a', 'aac', '-b:a', '128k',
       '-f', 'mp4',
       '-movflags', movFlags,
       '-',
@@ -2874,9 +3862,6 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
       const trimmed = text.trim()
       if (errorKeywords.some(kw => trimmed.includes(kw))) {
         logWarn(`FFMPEG: [stderr-error] ${trimmed.substring(0, 500)}`)
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('ffmpeg:stderr', { sessionId, line: trimmed.substring(0, 500) })
-        }
       }
     })
 
@@ -2884,7 +3869,7 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
       debugLog(`FFMPEG: HTTP request ${req.method} ${req.url} from ${req.socket?.remoteAddress}`)
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': safeCorsOrigin(req),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': '*',
         })
@@ -2893,7 +3878,7 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
       }
       res.writeHead(200, {
         'Content-Type': 'video/mp4',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': safeCorsOrigin(req),
         'Cache-Control': 'no-cache',
         'Accept-Ranges': 'none',
       })
@@ -2941,9 +3926,6 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
 
       ffmpegProc.on('error', (err) => {
         logError(`FFMPEG: process spawn error: ${err.message}`)
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('ffmpeg:stderr', { sessionId, line: `SPAWN ERROR: ${err.message}` })
-        }
         failResolve('FFmpeg process error: ' + err.message)
       })
 
@@ -2991,7 +3973,7 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
         activeResponses = []
       })
 
-      ffmpegServer.listen(0, '127.0.0.1', () => {
+      ffmpegServer.listen(0, '0.0.0.0', () => {
         serverPort = ffmpegServer.address().port
         serverProxyUrl = `http://127.0.0.1:${serverPort}/stream`
         logInfo(`FFMPEG: server ready on port ${serverPort}, waiting for first data...`)

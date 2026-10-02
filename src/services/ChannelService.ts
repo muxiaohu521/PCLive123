@@ -967,7 +967,7 @@ export async function readCacheEntry(url: string): Promise<CacheStorageEntry | n
   } catch { return null }
 }
 
-async function writeCacheEntry(url: string, entry: CacheStorageEntry): Promise<void> {
+export async function writeCacheEntry(url: string, entry: CacheStorageEntry): Promise<void> {
   if (!hasChannelCacheAPI()) return
   try { await window.electronAPI!.setChannelCacheEntry(url, entry) } catch (_) {}
 }

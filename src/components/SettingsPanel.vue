@@ -74,6 +74,12 @@
         <div class="section">
           <h4 class="section-title">字幕设置</h4>
           <div class="setting-row">
+            <label>字幕文件</label>
+            <button class="mini-btn" @click="handleSelectSubtitle">选择字幕文件</button>
+            <button v-if="subtitleLabel" class="mini-btn clear-btn" @click="handleClearSubtitle">清除</button>
+            <span class="setting-value" style="flex:none;min-width:auto">{{ subtitleLabel || '未加载' }}</span>
+          </div>
+          <div class="setting-row">
             <label>字幕字号</label>
             <select v-model.number="localSubFontSize" class="select">
               <option :value="12">小 (12px)</option>
@@ -278,6 +284,7 @@ import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/store'
 import { DECODE_MODE_LABELS } from '@/constants'
 import type { DecodeMode } from '@/constants'
+import { useSubtitle } from '@/composables/useSubtitle'
 import {
   getAllAdHosts, addAdHosts, removeAdHost, getExtraAdHosts, clearExtraAdHosts,
   getAdChannelKeywords, getExtraAdKeywords, addAdKeywords, removeAdKeyword, clearExtraAdKeywords,
@@ -287,6 +294,8 @@ import {
 
 const store = useAppStore()
 
+const { subtitleLabel, loadSubtitleFile, clearSubtitle } = useSubtitle()
+
 const emit = defineEmits<{
   close: []
   saved: [settings: Record<string, any>]
@@ -295,6 +304,14 @@ const emit = defineEmits<{
 function closeDialog() {
   store.showSettings = false
   emit('close')
+}
+
+function handleSelectSubtitle() {
+  loadSubtitleFile()
+}
+
+function handleClearSubtitle() {
+  clearSubtitle()
 }
 
 const STORAGE_KEY = 'pclive_settings'
@@ -407,6 +424,7 @@ function saveSettings() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   store.setDecodeMode(localDecodeMode.value)
   store.setFfmpegPath(localFfmpegPath.value)
+  store.bumpSubtitleStyleVersion()
   emit('saved', settings)
   ElMessage.success('设置已保存')
 }
@@ -614,6 +632,8 @@ function restoreBuiltinKw(kw: string) {
 }
 .mini-btn:hover { background: #4a4a6a; }
 .mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.clear-btn { background: #5a2a2a; border-color: #7a3a3a; color: #f87171; }
+.clear-btn:hover { background: #6a3a3a; color: #fca5a5; }
 
 .path-status { font-size: 11px; margin-top: 4px; }
 .path-status.ok { color: #4caf50; }

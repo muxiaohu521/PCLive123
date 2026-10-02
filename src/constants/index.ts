@@ -7,6 +7,8 @@ export const STORAGE_KEYS = {
   DECODE_MODE: 'pclive_decode_mode',
   FFMPEG_PATH: 'pclive_ffmpeg_path',
   LOCAL_VIDEOS: 'pclive_local_videos',
+  LOCAL_VIDEO_BRANCHES: 'pclive_local_video_branches',
+  LOCAL_VIDEO_ACTIVE_BRANCH: 'pclive_local_video_active_branch',
   LOCAL_PLAY_MODE: 'pclive_local_play_mode',
   SHORTCUTS: 'pclive_shortcuts',
 } as const
@@ -57,6 +59,12 @@ export interface LocalVideoItem {
   filePath: string
   size: number
   addedAt: number
+}
+
+export interface LocalVideoBranch {
+  id: string
+  name: string
+  videos: LocalVideoItem[]
 }
 
 export const DECODE_MODES = {

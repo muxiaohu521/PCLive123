@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+﻿const { contextBridge, ipcRenderer } = require('electron')
 
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev')
 
@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearNetworkingConfig: () => ipcRenderer.invoke('clear-networking-config'),
 
   openFileDialog: (options) => ipcRenderer.invoke('dialog:openFile', options || {}),
+  openMediaFile: (options) => ipcRenderer.invoke('dialog:openMediaFile', options || {}),
   saveFileDialog: (options) => ipcRenderer.invoke('dialog:saveFile', options || {}),
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('file:write', filePath, content),
@@ -49,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   floatWindowUpdate: (videoInfo) => ipcRenderer.invoke('float-window-update', videoInfo),
   closeFloatWindow: () => ipcRenderer.invoke('close-float-window'),
   floatWindowExists: () => ipcRenderer.invoke('float-window-exists'),
+  toggleFloatFullscreen: () => ipcRenderer.invoke('toggle-float-fullscreen'),
   onFloatVideoUpdate: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('float-video-update', handler)
@@ -68,6 +70,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dlnaStop: (deviceIndex) => ipcRenderer.invoke('dlna-stop', deviceIndex),
   dlnaPause: (deviceIndex) => ipcRenderer.invoke('dlna-pause', deviceIndex),
   dlnaSetVolume: (deviceIndex, volume) => ipcRenderer.invoke('dlna-set-volume', deviceIndex, volume),
+
+  tlv1Discover: (opts) => ipcRenderer.invoke('tlv1-discover', opts || {}),
+  tlv1Cast: (deviceIndex, videoUrl, options) => ipcRenderer.invoke('tlv1-cast', deviceIndex, videoUrl, options || {}),
+  tlv1Stop: (deviceIndex, sessionId) => ipcRenderer.invoke('tlv1-stop', deviceIndex, sessionId),
+  tlv1Pause: (deviceIndex, sessionId, currentPosition) => ipcRenderer.invoke('tlv1-pause', deviceIndex, sessionId, currentPosition),
+  tlv1Resume: (deviceIndex, sessionId) => ipcRenderer.invoke('tlv1-resume', deviceIndex, null, sessionId),
+  tlv1Seek: (deviceIndex, positionSec, sessionId) => ipcRenderer.invoke('tlv1-seek', deviceIndex, positionSec, sessionId),
+  tlv1SyncLocalChannels: (deviceIndex, channelsData) => ipcRenderer.invoke('tlv1-sync-local-channels', deviceIndex, channelsData),
+  tlv1GetSubnets: () => ipcRenderer.invoke('tlv1-get-subnets'),
+  tlv1GetLocalIps: () => ipcRenderer.invoke('tlv1-get-local-ips'),
+  tlv1EmulatorStatus: () => ipcRenderer.invoke('tlv1-emulator-status'),
+  tlv1EmulatorForward: () => ipcRenderer.invoke('tlv1-emulator-forward'),
+  tlv1Connect: (ip) => ipcRenderer.invoke('tlv1-connect', ip),
+  tlv1SelectAdb: () => ipcRenderer.invoke('tlv1-select-adb'),
+  tlv1SetAdbPath: (path) => ipcRenderer.invoke('tlv1-set-adb-path', path),
+  tlv1GetAdbPath: () => ipcRenderer.invoke('tlv1-get-adb-path'),
+  tlv1OnLog: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('tlv1:log', handler)
+    return () => ipcRenderer.removeListener('tlv1:log', handler)
+  },
 
   ffmpegSelectPath: () => ipcRenderer.invoke('ffmpeg:selectPath'),
   ffmpegTest: (ffmpegPath) => ipcRenderer.invoke('ffmpeg:test', ffmpegPath),

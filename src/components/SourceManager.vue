@@ -34,7 +34,7 @@
           </div>
           <div class="source-list">
             <div
-              v-for="source in sortedSourceList"
+              v-for="source in store.sourceList"
               :key="source.url"
               class="source-item"
               :class="{ active: source.url === store.currentSource }"
@@ -211,8 +211,6 @@ function onAddClick() {
 }
 
 const importExportDisabled = computed(() => !store.channelGroups || store.channelGroups.length === 0)
-
-const sortedSourceList = computed(() => store.sortedSourceList)
 
 function getHealth(url: string): string {
   return sourceHealth.value.get(url) || 'gray'

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <FloatView v-if="isFloatMode" />
   <div v-else class="app-container" @mousemove="onMouseMove" tabindex="0" ref="appRef">
     <TitleBar />
@@ -25,7 +25,6 @@
         />
         <webview v-if="store.yspWebviewUrl"
           :key="store.yspWebviewUrl"
-          ref="yspWebviewRef"
           :src="store.yspWebviewUrl"
           class="ysp-webview"
           @dom-ready="onYspDomReady"
@@ -63,9 +62,14 @@
         />
         <ToolsDialog />
         <DlnaPanel
-          v-if="store.showDlna"
+          v-show="store.showDlna"
           :currentUrl="currentChannelUrl || ''"
+          :currentTime="videoCurrentTime"
           @close="store.showDlna = false"
+        />
+        <SyncTVPanel
+          v-if="store.showSyncTVPanel"
+          @close="store.showSyncTVPanel = false"
         />
         <SettingsPanel
           @close="store.showSettings = false"
@@ -128,6 +132,7 @@ import SettingsPanel from '@/components/SettingsPanel.vue'
 import FloatView from '@/views/FloatView.vue'
 import LocalVideoList from '@/components/LocalVideoList.vue'
 import LocalChannelsList from '@/components/LocalChannelsList.vue'
+import SyncTVPanel from '@/components/SyncTVPanel.vue'
 import YspPanel from '@/components/YspPanel.vue'
 
 const store = useAppStore()
@@ -144,7 +149,8 @@ const {
 } = useInputContextMenu()
 const appRef = ref<HTMLElement | null>(null)
 const videoPlayerRef = ref<InstanceType<typeof VideoPlayer>>()
-const yspWebviewRef = ref<any>(null)
+const videoCurrentTime = ref(0)
+let currentTimeTimer: ReturnType<typeof setInterval> | null = null
 const isFloatMode = ref(window.location.hash === '#/float')
 const showBottomBar = ref(true)
 let hideTimer: ReturnType<typeof setTimeout> | null = null
@@ -276,18 +282,38 @@ function findFlatIndex(): number {
 }
 
 onMounted(async () => {
-  await store.initSources()
-  await store.loadChannels()
-  store.loadLocalChannels()
-  await store.loadYspChannels()
-  registerGlobalListener()
+  logger.info('[App] onMounted starting')
+  try {
+    await store.initSources()
+    await store.loadChannels()
+    store.loadLocalChannels()
+    await store.loadYspChannels()
+    registerGlobalListener()
+    logger.info('[App] init done, setting up listeners')
+  } catch (e: any) {
+    logger.error('[App] onMounted init failed:', e?.message || e)
+  }
 
   appRef.value?.focus()
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('beforeunload', onBeforeUnload)
+
+  window.addEventListener('error', (e) => {
+    logger.error('[App] window.onerror:', e.message, 'at', e.filename, ':', e.lineno, ':', e.colno, 'error:', e.error)
+  })
+  window.addEventListener('unhandledrejection', (e) => {
+    logger.error('[App] unhandledrejection:', e.reason)
+  })
+
+  logger.info('[App] onMounted complete')
+
+  currentTimeTimer = setInterval(() => {
+    videoCurrentTime.value = videoPlayerRef.value?.getCurrentTime() || 0
+  }, 1000)
 })
 
 onUnmounted(() => {
+  if (currentTimeTimer) { clearInterval(currentTimeTimer); currentTimeTimer = null }
   if (hideTimer) {
     clearTimeout(hideTimer)
     hideTimer = null
@@ -382,6 +408,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
       store.showYspPanel = false
+      store.showSyncTVPanel = false
     }
     return
   }
@@ -395,6 +422,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLocalVideoList = false
       store.showLocalChannelsList = false
       store.showYspPanel = false
+      store.showSyncTVPanel = false
     }
     return
   }
@@ -421,6 +449,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalVideoList = false
       store.showYspPanel = false
+      store.showSyncTVPanel = false
     }
     return
   }
@@ -450,6 +479,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalChannelsList = false
       store.showYspPanel = false
+      store.showSyncTVPanel = false
     }
     return
   }
@@ -465,6 +495,7 @@ function onKeyDown(e: KeyboardEvent) {
       store.showLivesPanel = false
       store.showLocalChannelsList = false
       store.showYspPanel = false
+      store.showSyncTVPanel = false
     }
     return
   }
@@ -787,7 +818,6 @@ body {
 }
 
 .app-container {
-  width: 100vw;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -798,7 +828,6 @@ body {
 .main-content {
   flex: 1;
   display: flex;
-  overflow: hidden;
   position: relative;
 }
 
@@ -822,12 +851,13 @@ body {
   right: 0;
   bottom: 65px;
   width: 360px;
-  z-index: 999;
   pointer-events: none;
 }
 
 .side-panels > * {
   pointer-events: auto;
+  position: relative;
+  z-index: 999;
 }
 
 .bottom-bar {

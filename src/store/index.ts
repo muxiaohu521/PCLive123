@@ -1,9 +1,9 @@
-import { ref, computed, watch } from 'vue'
+﻿import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { ChannelService } from '@/services/ChannelService'
 import { logger } from '@/utils/logger'
 import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI } from '@/constants'
-import type { SourceItem, DecodeMode, LocalVideoItem, PlayMode } from '@/constants'
+import type { SourceItem, DecodeMode, LocalVideoItem, LocalVideoBranch, PlayMode } from '@/constants'
 import type { LiveChannelGroup, LiveChannelItem, LiveSourceGroup } from '@/models/LiveChannelItem'
 import type { GeoInfo } from '@/utils/GeoService'
 import {
@@ -205,15 +205,50 @@ function restoreChannelSourceIndex(channel: LiveChannelItem): void {
   }
 }
 
-function loadLocalVideos(): LocalVideoItem[] {
-  return safeJsonParse<LocalVideoItem[]>(
+function loadLocalVideoBranches(): LocalVideoBranch[] {
+  const raw = safeJsonParse<LocalVideoBranch[] | null>(
+    localStorage.getItem(STORAGE_KEYS.LOCAL_VIDEO_BRANCHES),
+    null,
+  )
+  if (raw && Array.isArray(raw) && raw.length > 0) {
+    return raw
+  }
+  // 迁移旧格式: 将旧的单个列表转换为默认分支
+  const oldVideos = safeJsonParse<LocalVideoItem[]>(
     localStorage.getItem(STORAGE_KEYS.LOCAL_VIDEOS),
     [],
   )
+  if (oldVideos.length > 0) {
+    const defaultBranch: LocalVideoBranch = {
+      id: generateBranchId(),
+      name: '默认列表',
+      videos: oldVideos.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    }
+    // 清除旧格式数据
+    localStorage.removeItem(STORAGE_KEYS.LOCAL_VIDEOS)
+    return [defaultBranch]
+  }
+  return []
 }
 
-function saveLocalVideos(list: LocalVideoItem[]): void {
-  localStorage.setItem(STORAGE_KEYS.LOCAL_VIDEOS, JSON.stringify(list))
+function generateBranchId(): string {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+}
+
+function saveLocalVideoBranches(branches: LocalVideoBranch[]): void {
+  localStorage.setItem(STORAGE_KEYS.LOCAL_VIDEO_BRANCHES, JSON.stringify(branches))
+}
+
+function loadActiveLocalVideoBranchId(): string {
+  return localStorage.getItem(STORAGE_KEYS.LOCAL_VIDEO_ACTIVE_BRANCH) || ''
+}
+
+function saveActiveLocalVideoBranchId(id: string): void {
+  if (id) {
+    localStorage.setItem(STORAGE_KEYS.LOCAL_VIDEO_ACTIVE_BRANCH, id)
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.LOCAL_VIDEO_ACTIVE_BRANCH)
+  }
 }
 
 function loadLocalPlayMode(): PlayMode {
@@ -259,6 +294,7 @@ export const useAppStore = defineStore('app', () => {
   const externalPlayInfo = ref<{ url: string; headers: Record<string, string>; format: string; title: string } | null>(null)
   const pendingSniffUrl = ref<{ url: string; format: string; name: string } | null>(null)
   const showDlna = ref(false)
+  const showSyncTVPanel = ref(false)
   const showSettings = ref(false)
   const localChannelsData = ref<LocalChannelsData>({ lives: [] })
   const yspChannels = ref<YspChannelItem[]>([])
@@ -268,11 +304,22 @@ export const useAppStore = defineStore('app', () => {
   const activeLocalLiveChannelIndex = ref(-1)
   const decodeMode = ref<DecodeMode>(loadDecodeMode())
   const ffmpegPath = ref<string>(loadFfmpegPath())
-  const localVideoList = ref<LocalVideoItem[]>((() => {
-    const list = loadLocalVideos()
-    list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-    return list
-  })())
+  const localVideoBranches = ref<LocalVideoBranch[]>(loadLocalVideoBranches())
+  const activeLocalVideoBranchId = ref<string>(initActiveBranchId())
+
+  function initActiveBranchId(): string {
+    const saved = loadActiveLocalVideoBranchId()
+    if (saved && localVideoBranches.value.some(b => b.id === saved)) {
+      return saved
+    }
+    const firstId = localVideoBranches.value[0]?.id || ''
+    saveActiveLocalVideoBranchId(firstId)
+    return firstId
+  }
+  const localVideoList = computed<LocalVideoItem[]>(() => {
+    const branch = localVideoBranches.value.find(b => b.id === activeLocalVideoBranchId.value)
+    return branch?.videos || []
+  })
   const localPlayMode = ref<PlayMode>(loadLocalPlayMode())
   const currentLocalVideo = ref<LocalVideoItem | null>(null)
   const showLocalVideoList = ref(false)
@@ -413,6 +460,11 @@ function _doPersistSourceStats(): void {
   function setFfmpegPath(path: string): void {
     ffmpegPath.value = path
     saveFfmpegPath(path)
+  }
+
+  const subtitleStyleVersion = ref(0)
+  function bumpSubtitleStyleVersion(): void {
+    subtitleStyleVersion.value++
   }
 
   async function initSources(): Promise<void> {
@@ -736,24 +788,52 @@ function _doPersistSourceStats(): void {
     await loadChannels(undefined, true)
   }
 
-  function sortLocalVideoList(): void {
-    localVideoList.value.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  function _activeBranch(): LocalVideoBranch | undefined {
+    return localVideoBranches.value.find(b => b.id === activeLocalVideoBranchId.value)
+  }
+
+  function _saveBranches(): void {
+    saveLocalVideoBranches(localVideoBranches.value)
+  }
+
+  // 确保至少有一个默认分支
+  function ensureDefaultBranch(): void {
+    if (localVideoBranches.value.length === 0) {
+      const defaultBranch: LocalVideoBranch = {
+        id: generateBranchId(),
+        name: '默认列表',
+        videos: [],
+      }
+      localVideoBranches.value = [defaultBranch]
+      activeLocalVideoBranchId.value = defaultBranch.id
+      saveActiveLocalVideoBranchId(defaultBranch.id)
+      _saveBranches()
+    }
+  }
+
+  function sortBranchVideos(branch: LocalVideoBranch): void {
+    branch.videos.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   }
 
   function addLocalVideos(videos: LocalVideoItem[]): number {
-    const existingPaths = new Set(localVideoList.value.map(v => v.filePath))
+    ensureDefaultBranch()
+    const branch = _activeBranch()
+    if (!branch) return 0
+    const existingPaths = new Set(branch.videos.map(v => v.filePath))
     const newVideos = videos.filter(v => !existingPaths.has(v.filePath))
     if (newVideos.length > 0) {
-      localVideoList.value.push(...newVideos)
-      sortLocalVideoList()
-      saveLocalVideos(localVideoList.value)
+      branch.videos.push(...newVideos)
+      sortBranchVideos(branch)
+      _saveBranches()
     }
     return newVideos.length
   }
 
   function removeLocalVideo(filePath: string): void {
-    localVideoList.value = localVideoList.value.filter(v => v.filePath !== filePath)
-    saveLocalVideos(localVideoList.value)
+    const branch = _activeBranch()
+    if (!branch) return
+    branch.videos = branch.videos.filter(v => v.filePath !== filePath)
+    _saveBranches()
     if (currentLocalVideo.value?.filePath === filePath) {
       currentLocalVideo.value = null
       if (activePlayMode.value === 'local') {
@@ -764,12 +844,74 @@ function _doPersistSourceStats(): void {
   }
 
   function clearLocalVideos(): void {
-    localVideoList.value = []
-    saveLocalVideos([])
+    const branch = _activeBranch()
+    if (!branch) return
+    branch.videos = []
+    _saveBranches()
     currentLocalVideo.value = null
     if (activePlayMode.value === 'local') {
       externalPlayInfo.value = null
       activePlayMode.value = null
+    }
+  }
+
+  // ========== 分支管理 ==========
+  function addLocalVideoBranch(name: string): LocalVideoBranch | null {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    // 检查重名
+    if (localVideoBranches.value.some(b => b.name === trimmed)) return null
+    const branch: LocalVideoBranch = {
+      id: generateBranchId(),
+      name: trimmed,
+      videos: [],
+    }
+    localVideoBranches.value.push(branch)
+    activeLocalVideoBranchId.value = branch.id
+    saveActiveLocalVideoBranchId(branch.id)
+    _saveBranches()
+    return branch
+  }
+
+  function removeLocalVideoBranch(branchId: string): boolean {
+    if (localVideoBranches.value.length <= 1) return false
+    const idx = localVideoBranches.value.findIndex(b => b.id === branchId)
+    if (idx < 0) return false
+    // 清除该分支的当前播放状态
+    if (activeLocalVideoBranchId.value === branchId) {
+      currentLocalVideo.value = null
+      if (activePlayMode.value === 'local') {
+        externalPlayInfo.value = null
+        activePlayMode.value = null
+      }
+    }
+    localVideoBranches.value.splice(idx, 1)
+    // 如果删除的是当前活跃分支，切换到第一个
+    if (activeLocalVideoBranchId.value === branchId) {
+      const newActive = localVideoBranches.value[0]
+      activeLocalVideoBranchId.value = newActive?.id || ''
+      saveActiveLocalVideoBranchId(activeLocalVideoBranchId.value)
+    }
+    _saveBranches()
+    return true
+  }
+
+  function renameLocalVideoBranch(branchId: string, newName: string): boolean {
+    const branch = localVideoBranches.value.find(b => b.id === branchId)
+    if (!branch) return false
+    const trimmed = newName.trim()
+    if (!trimmed) return false
+    // 检查重名（排除自己）
+    if (localVideoBranches.value.some(b => b.id !== branchId && b.name === trimmed)) return false
+    branch.name = trimmed
+    _saveBranches()
+    return true
+  }
+
+  function setActiveLocalVideoBranch(branchId: string): void {
+    if (localVideoBranches.value.some(b => b.id === branchId)) {
+      activeLocalVideoBranchId.value = branchId
+      saveActiveLocalVideoBranchId(branchId)
     }
   }
 
@@ -1222,10 +1364,13 @@ function _doPersistSourceStats(): void {
     externalPlayInfo,
     pendingSniffUrl,
     showDlna,
+    showSyncTVPanel,
     showSettings,
     decodeMode,
     ffmpegPath,
     localVideoList,
+    localVideoBranches,
+    activeLocalVideoBranchId,
     localPlayMode,
     currentLocalVideo,
     showLocalVideoList,
@@ -1249,9 +1394,15 @@ function _doPersistSourceStats(): void {
     clearExternalPlay,
     setDecodeMode,
     setFfmpegPath,
+    subtitleStyleVersion,
+    bumpSubtitleStyleVersion,
     addLocalVideos,
     removeLocalVideo,
     clearLocalVideos,
+    addLocalVideoBranch,
+    removeLocalVideoBranch,
+    renameLocalVideoBranch,
+    setActiveLocalVideoBranch,
     selectLocalVideo,
     setLocalPlayMode,
     playNextLocalVideo,

@@ -29,10 +29,8 @@ function writeYspLog(level, msg) {
   if (level > CURRENT_LOG_LEVEL) return
   const label = LOG_LABEL[level] || '????'
   const line = '[' + new Date().toISOString() + '] [' + label + '] [' + TAG + '] ' + msg
-  if (isDev) {
-    const fn = level <= LOG_LEVEL.WARN ? 'error' : 'log'
-    console[fn](line)
-  }
+  const fn = level <= LOG_LEVEL.WARN ? 'error' : 'log'
+  console[fn](line)
   try {
     const logDir = getLogDir()
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
@@ -237,6 +235,10 @@ function extractYangshipinChannels() {
         const w = yspWin
         if (w && !w.isDestroyed()) { w.close(); yspLogVerbose('win closed') }
       } catch (_) {}
+      try {
+        yspSession.close()
+        yspLogVerbose('session closed')
+      } catch (_) {}
       resolve(result)
     }
 
@@ -259,6 +261,7 @@ function extractYangshipinChannels() {
       yspLogVerbose('BrowserWindow created')
     } catch (e) {
       yspLogError('BrowserWindow create failed: ' + e.message)
+      try { yspSession.close() } catch (_) {}
       resolve({ success: false, channels: [], message: 'window create error' })
       return
     }

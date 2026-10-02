@@ -11,17 +11,18 @@ param(
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $scriptDir
 
 # ================================================================
 # 0. 路径定义
 # ================================================================
-$ElectronDir  = Join-Path $scriptDir "node_modules\electron\dist"
-$DistDir      = Join-Path $scriptDir "dist"
-$ElectronSrc  = Join-Path $scriptDir "electron"
-$OutputRoot   = Join-Path $scriptDir "PCLive-portable"
+$ElectronDir  = Join-Path $projectRoot "node_modules\electron\dist"
+$DistDir      = Join-Path $projectRoot "dist"
+$ElectronSrc  = Join-Path $projectRoot "electron"
+$OutputRoot   = Join-Path $projectRoot "PCLive-portable"
 $OutputDir    = Join-Path $OutputRoot $OutputName
 $ResourcesDir = Join-Path $OutputDir "resources"
-$NodeModules  = Join-Path $scriptDir "node_modules"
+$NodeModules  = Join-Path $projectRoot "node_modules"
 
 # ================================================================
 # 1. 环境检查
@@ -37,7 +38,7 @@ Write-Host "[STEP 0] Checking environment..." -ForegroundColor Yellow
 # 自动检测 / 下载 Node.js
 # ============================================================
 function Install-NodeJs {
-    $nodeToolsDir = Join-Path $scriptDir "tools\node"
+    $nodeToolsDir = Join-Path $projectRoot "tools\node"
     if (-not (Test-Path $nodeToolsDir)) {
         New-Item -ItemType Directory -Force -Path $nodeToolsDir | Out-Null
     }
@@ -85,7 +86,7 @@ function Get-NodeBin {
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCmd) { $nodeBin = Split-Path $nodeCmd.Source -Parent }
     if (-not $nodeBin) {
-        $localNode = Join-Path $scriptDir "tools\node"
+        $localNode = Join-Path $projectRoot "tools\node"
         if (Test-Path "$localNode\node.exe") { $nodeBin = $localNode }
         else {
             $found = Get-ChildItem -Path $localNode -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path "$($_.FullName)\node.exe" } | Select-Object -First 1
@@ -248,7 +249,7 @@ if ($cleanResult) {
 }
 
 # 清理临时 asar 目录
-$tempAsar = Join-Path $scriptDir "_asar_temp"
+$tempAsar = Join-Path $projectRoot "_asar_temp"
 $null = Remove-DirForce -Path $tempAsar
 
 Write-Host "  Clean OK" -ForegroundColor Green
@@ -265,7 +266,7 @@ if ($CleanOnly) {
 if (-not $SkipViteBuild) {
     Write-Host "[STEP 2] Building frontend (vite)..." -ForegroundColor Yellow
     
-    Push-Location $scriptDir
+    Push-Location $projectRoot
     try {
         npx vite build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
         if ($LASTEXITCODE -ne 0) {
@@ -392,7 +393,7 @@ Copy-Item $electronSrcDir -Destination $electronDst -Recurse -Force
 Write-Host "  Copied: electron/" -ForegroundColor Gray
 
 # --- 5c. 复制 data/ 数据目录（sources.json, verified_channels.json, ysp_channels.json, cache/） ---
-$dataDir = Join-Path $scriptDir "data"
+$dataDir = Join-Path $projectRoot "data"
 if (Test-Path $dataDir) {
     $dataDest = Join-Path $OutputDir "data"
     Copy-Item $dataDir -Destination $dataDest -Recurse -Force
@@ -404,7 +405,7 @@ if (Test-Path $dataDir) {
 }
 
 # --- 5d. 复制 package.json (只保留必要字段) ---
-$pkgJson = Get-Content (Join-Path $scriptDir "package.json") -Raw | ConvertFrom-Json
+$pkgJson = Get-Content (Join-Path $projectRoot "package.json") -Raw | ConvertFrom-Json
 $minimalPkg = @{
     name = $pkgJson.name
     version = $pkgJson.version

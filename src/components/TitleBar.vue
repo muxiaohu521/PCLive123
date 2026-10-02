@@ -2,7 +2,7 @@
   <div class="title-bar" @dblclick="onMaximize">
     <div class="title-bar-left">
       <span class="app-logo">PCLive</span>
-      <span class="app-version">v1.0.0</span>
+      <span class="app-version">v1.2.0</span>
     </div>
     <div class="title-bar-center">
       <template v-if="store.activePlayMode === 'channel'">
@@ -50,7 +50,7 @@
         </span>
       </template>
       <template v-else>
-        <span class="mode-label">本地视频模式</span>
+        <span class="mode-label">就绪</span>
       </template>
       <span class="separator">|</span>
       <el-button
