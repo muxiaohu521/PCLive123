@@ -34,7 +34,7 @@
           </div>
           <div class="source-list">
             <div
-              v-for="source in store.sourceList"
+              v-for="source in store.sortedSourceList"
               :key="source.url"
               class="source-item"
               :class="{ active: source.url === store.currentSource }"
@@ -184,6 +184,20 @@ function isValidCache(entry: CacheStorageEntry | null): entry is CacheStorageEnt
   return true
 }
 
+async function parseAndCache(url: string, options?: { maxRetries?: number }): Promise<LiveChannelGroup[]> {
+  const groups = await ChannelService.loadChannelsRobust(url, {
+    skipCache: true,
+    maxRetries: options?.maxRetries ?? 1,
+  })
+  if (groups.length > 0) {
+    const totalCh = groups.reduce((s, g) => s + g.liveChannels.length, 0)
+    store.sourceStats.set(url, { channelCount: totalCh, parsedAt: Date.now() })
+    store.flushSourceStats()
+    logger.log('[SourceManager] Parsed and cached:', groups.length, 'groups,', totalCh, 'channels')
+  }
+  return groups
+}
+
 defineEmits<{
   close: []
 }>()
@@ -323,13 +337,9 @@ async function onConfirmImport() {
       .replace(/[_-]/g, ' ')
       .trim() || '导入源'
     const action = await store.addSource(name, dataUri)
-    // 导入后直接解析并写入缓存，更新台数
-    ChannelService.loadChannels(dataUri, 0).then(groups => {
+    parseAndCache(dataUri).then(groups => {
       if (groups.length > 0) {
-        const totalCh = groups.reduce((s, g) => s + g.liveChannels.length, 0)
-        store.sourceStats.set(dataUri, { channelCount: totalCh, parsedAt: Date.now() })
-        store.flushSourceStats()
-        logger.log('[SourceManager] M3U import cached:', groups.length, 'groups,', totalCh, 'channels')
+        logger.log('[SourceManager] M3U import cached:', groups.length, 'groups')
       }
     }).catch((e: unknown) => {
       logger.log('[SourceManager] M3U import parse failed:', e instanceof Error ? e.message : e)
@@ -373,14 +383,8 @@ async function onConfirmImport() {
     if (appendedUrls.length > 0) {
       let completed = 0
       let flushed = false
-      // 逐个加载以更新 sourceStats
       appendedUrls.forEach(url => {
-        ChannelService.loadChannels(url, 0).then(groups => {
-          if (groups.length > 0) {
-            const totalCh = groups.reduce((s, g) => s + g.liveChannels.length, 0)
-            store.sourceStats.set(url, { channelCount: totalCh, parsedAt: Date.now() })
-          }
-        }).catch(() => {}).finally(() => {
+        parseAndCache(url).catch(() => {}).finally(() => {
           completed++
           if (!flushed && completed >= appendedUrls.length) {
             flushed = true
@@ -401,13 +405,9 @@ async function onConfirmImport() {
       .replace(/[_-]/g, ' ')
       .trim() || '导入源'
     const action = await store.addSource(name, dataUri)
-    // 导入后直接解析并写入缓存，更新台数
-    ChannelService.loadChannels(dataUri, 0).then(groups => {
+    parseAndCache(dataUri).then(groups => {
       if (groups.length > 0) {
-        const totalCh = groups.reduce((s, g) => s + g.liveChannels.length, 0)
-        store.sourceStats.set(dataUri, { channelCount: totalCh, parsedAt: Date.now() })
-        store.flushSourceStats()
-        logger.log('[SourceManager] JSON import cached:', groups.length, 'groups,', totalCh, 'channels')
+        logger.log('[SourceManager] JSON import cached:', groups.length, 'groups')
       }
     }).catch((e: unknown) => {
       logger.log('[SourceManager] JSON import parse failed:', e instanceof Error ? e.message : e)
@@ -467,7 +467,10 @@ async function onExportClick() {
   if (channels.length === 0 && sourceUrl) {
     const loading = ElMessage({ message: '缓存无效，正在联网获取...', type: 'info', duration: 0 })
     try {
-      const groups = await ChannelService.loadChannels(sourceUrl, 0, undefined, undefined, undefined, true)
+      const groups = await ChannelService.loadChannelsRobust(sourceUrl, {
+        skipCache: true,
+        maxRetries: 1,
+      })
       loading.close()
       channels = groups.flatMap(g =>
         g.liveChannels.map(ch => ({
@@ -553,7 +556,10 @@ async function onExportAllClick() {
 
         // Priority 2: network
         if (!groups) {
-          groups = await ChannelService.loadChannels(source.url, 0, undefined, undefined, undefined, true)
+          groups = await ChannelService.loadChannelsRobust(source.url, {
+            skipCache: true,
+            maxRetries: 1,
+          })
         }
 
         if (!groups || groups.length === 0) {

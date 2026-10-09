@@ -45,29 +45,65 @@ function isIpv6Url(url: string, srcName: string): boolean {
   return false
 }
 
-function sortUrlsIpv6First(raw: any[]): any[] {
-  const pairs = raw.map((u, i) => {
-    const parts = (typeof u === 'string' ? u : '').split('$', 2)
-    return { url: parts[0], name: parts.length > 1 ? parts[1] : '', origIndex: i, raw: u }
-  })
-  pairs.sort((a, b) => {
-    const a6 = isIpv6Url(a.url, a.name) ? 1 : 0
-    const b6 = isIpv6Url(b.url, b.name) ? 1 : 0
-    return b6 - a6
-  })
-  return pairs.map(p => p.raw)
+// URL quality scoring constants
+const STREAM_EXTENSIONS = ['.m3u8', '.ts', '.flv', '.rtmp', '.rtsp', '.smil', '.mpd', '.m3u']
+const AUDIO_EXTENSIONS = ['.mp3', '.aac', '.wav', '.flac', '.ogg', '.wma', '.m4a', '.opus']
+const JUNK_EXTENSIONS = ['.ttf', '.woff', '.woff2', '.eot', '.svg', '.css', '.js', '.map', '.ico', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.rar', '.7z', '.tar', '.gz', '.exe', '.dmg', '.apk', '.ipa']
+const BLOCKED_URL_KEYWORDS = ['baidu.com', 'pan.baidu.com', 't.cn', 'qr.alipay.com', 'weixin.qq.com', 'xingxingzaixian', 'aliyundrive']
+
+export function hasIpv6Hint(
+  url: string,
+  srcName: string,
+  channelName: string,
+  groupName: string,
+  subLineName: string,
+): boolean {
+  if (isIpv6Url(url, srcName)) return true
+  const channelName6 = channelName || ''
+  if (/(^|[^a-z])ipv6|ipv6([^a-z]|$)/i.test(channelName6)) return true
+  if (/(^|[^a-z])v6([^a-z]|$)/i.test(channelName6)) return true
+  const groupName6 = groupName || ''
+  if (/(^|[^a-z])ipv6|ipv6([^a-z]|$)/i.test(groupName6)) return true
+  if (/(^|[^a-z])v6([^a-z]|$)/i.test(groupName6)) return true
+  const subLine6 = subLineName || ''
+  if (/(^|[^a-z])ipv6|ipv6([^a-z]|$)/i.test(subLine6)) return true
+  if (/(^|[^a-z])v6([^a-z]|$)/i.test(subLine6)) return true
+  return false
+}
+
+export function scoreChannelUrl(url: string): number {
+  if (!url) return -1
+  const lower = url.toLowerCase()
+  for (const kw of BLOCKED_URL_KEYWORDS) {
+    if (lower.includes(kw)) return -1
+  }
+  for (const ext of JUNK_EXTENSIONS) {
+    if (lower.endsWith(ext) || lower.includes(ext + '?')) return -1
+  }
+  for (const ext of STREAM_EXTENSIONS) {
+    if (lower.includes(ext)) return 0
+  }
+  for (const ext of AUDIO_EXTENSIONS) {
+    if (lower.includes(ext)) return 1
+  }
+  return 2
 }
 
 export function createChannel(raw: any): LiveChannelItem {
   const urls: string[] = []
   const srcNames: string[] = []
-  const sortedRawUrls = sortUrlsIpv6First(raw.urls || [])
+  const rawUrls = raw.urls || []
   let idx = 1
-  for (const url of sortedRawUrls) {
+  for (const url of rawUrls) {
     const parts = url.split('$', 2)
     urls.push(parts[0])
     srcNames.push(parts.length > 1 ? parts[1] : '源' + (idx++))
   }
+  const scored = urls.map((u, i) => ({ url: u, name: srcNames[i], score: scoreChannelUrl(u) }))
+    .filter(item => item.score >= 0)
+  scored.sort((a, b) => a.score - b.score)
+  const filteredUrls = scored.map(item => item.url)
+  const filteredNames = scored.map(item => item.name)
   return {
     channelName: (raw.name || '').toString().trim(),
     channelNum: 0,
@@ -81,10 +117,10 @@ export function createChannel(raw: any): LiveChannelItem {
     channelTvgName: raw['tvg-name'] || '',
     channelHeader: (typeof raw.header === 'object' && raw.header !== null) ? raw.header : {},
     channelParse: typeof raw.parse === 'number' ? raw.parse : 0,
-    channelUrls: urls,
-    channelSourceNames: srcNames,
+    channelUrls: filteredUrls,
+    channelSourceNames: filteredNames,
     sourceIndex: 0,
-    sourceNum: urls.length,
+    sourceNum: filteredUrls.length,
     includeBack: false
   }
 }

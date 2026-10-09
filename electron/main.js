@@ -1,4 +1,4 @@
-﻿const dns = require('dns')
+const dns = require('dns')
 dns.setDefaultResultOrder('ipv4first')
 
 const { app, BrowserWindow, ipcMain, dialog, session, net, shell } = require('electron')
@@ -211,6 +211,96 @@ function extractSetCookieHeaders(headers) {
   if (candidates.length === 0) return null
   if (candidates.length === 1) return headers[candidates[0]]
   return candidates.map(k => headers[k]).flat()
+}
+
+// ============ GitHub Mirror Fallback ============
+const GITHUB_MIRRORS = [
+  'https://gh-proxy.org/',
+  'https://mirror.ghproxy.com/',
+  'https://gh.llkk.cc/',
+  'https://gh.jiasu.in/',
+  'https://github.moeyy.xyz/',
+  'https://gh.con.sh/',
+  'https://gh.api.99988866.xyz/',
+]
+
+function stripGhProxy(url) {
+  for (const mirror of GITHUB_MIRRORS) {
+    if (url.startsWith(mirror)) {
+      const inner = url.substring(mirror.length)
+      if (/^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\/.+/i.test(inner)) {
+        return { strippedUrl: inner, wasProxied: true }
+      }
+      return { strippedUrl: inner, wasProxied: true }
+    }
+  }
+  if (/^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\/.+/i.test(url)) {
+    return { strippedUrl: url, wasProxied: false }
+  }
+  return { strippedUrl: url, wasProxied: false }
+}
+
+// Speed-test all GitHub mirrors concurrently, return top 2 fastest
+let fastestGitHubMirrors = null
+let mirrorSpeedTestRunning = false
+
+async function getFastestGitHubMirrors(timeout = 3000) {
+  if (fastestGitHubMirrors) return fastestGitHubMirrors
+  // Simple mutex to prevent concurrent speed-tests
+  while (mirrorSpeedTestRunning) {
+    await new Promise(r => setTimeout(r, 50))
+    if (fastestGitHubMirrors) return fastestGitHubMirrors
+  }
+  mirrorSpeedTestRunning = true
+  try {
+    const results = await Promise.allSettled(
+      GITHUB_MIRRORS.map(m => testMirrorSpeed(m, timeout))
+    )
+    const valid = results
+      .filter(r => r.status === 'fulfilled' && r.value[1] !== Infinity)
+      .map(r => r.value)
+      .sort((a, b) => a[1] - b[1])
+
+    fastestGitHubMirrors = valid.slice(0, 2).map(v => v[0])
+    if (fastestGitHubMirrors.length === 0) {
+      fastestGitHubMirrors = GITHUB_MIRRORS.slice(0, 2)
+    }
+    logInfo('GH MIRROR speed test complete, top 2: ' + fastestGitHubMirrors.join(', '))
+    return fastestGitHubMirrors
+  } finally {
+    mirrorSpeedTestRunning = false
+  }
+}
+
+function testMirrorSpeed(mirror, timeout) {
+  return new Promise((resolve) => {
+    const start = Date.now()
+    try {
+      const parsed = new URL(mirror)
+      const httpMod = parsed.protocol === 'https:' ? https : http
+      const req = httpMod.request(parsed.href, {
+        method: 'HEAD',
+        timeout: timeout,
+        rejectUnauthorized: false,
+        headers: { 'User-Agent': 'okhttp/3.15.0' },
+      }, (res) => {
+        res.resume()
+        res.on('end', () => {
+          const elapsed = Date.now() - start
+          debugLog('GH MIRROR speed: ' + mirror + ' = ' + elapsed + 'ms')
+          resolve([mirror, elapsed])
+        })
+      })
+      req.on('error', () => resolve([mirror, Infinity]))
+      req.on('timeout', () => {
+        req.destroy()
+        resolve([mirror, Infinity])
+      })
+      req.end()
+    } catch (_) {
+      resolve([mirror, Infinity])
+    }
+  })
 }
 
 const sourcesFilePath = app.isPackaged
@@ -760,7 +850,7 @@ function buildReqHeaders(parsedUrl, reqHeaders) {
   const defaultOrigin = explicitOrigin || (isBaiduCdn ? 'https://haokan.baidu.com' : origin)
   const headers = {
     'Host': hostHeader,
-    'User-Agent': reqHeaders['User-Agent'] || 'AptvPlayer-UA',
+    'User-Agent': reqHeaders['User-Agent'] || 'okhttp/3.15.0',
     'Accept': reqHeaders['Accept'] || '*/*',
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'Accept-Encoding': 'gzip, deflate',
@@ -1657,7 +1747,7 @@ function probeContentTypeFast(url) {
     const httpMod = parsed.protocol === 'https:' ? https : http
     const req = httpMod.request(parsed, {
       method: 'HEAD',
-      headers: buildReqHeaders(parsed, { 'User-Agent': 'AptvPlayer-UA' }),
+      headers: buildReqHeaders(parsed, { 'User-Agent': 'okhttp/3.15.0' }),
       rejectUnauthorized: false,
       family: getIpFamily(parsed),
       timeout: 5000,
@@ -1763,7 +1853,7 @@ app.whenReady().then(() => {
 
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     if (!details.requestHeaders['User-Agent']) {
-      details.requestHeaders['User-Agent'] = 'AptvPlayer-UA'
+      details.requestHeaders['User-Agent'] = 'okhttp/3.15.0'
     }
     // Inject Referer/Origin for registered video CDN domains
     // This is the standard Electron approach — works for <video>, XHR, fetch, etc.
@@ -2027,6 +2117,19 @@ app.whenReady().then(() => {
     return true
   })
 
+  ipcMain.handle('network:hasIpv6', async () => {
+    try {
+      const interfaces = os.networkInterfaces()
+      for (const iface of Object.values(interfaces)) {
+        if (!iface) continue
+        for (const addr of iface) {
+          if (addr.family === 'IPv6' && !addr.internal) return true
+        }
+      }
+    } catch (_) {}
+    return false
+  })
+
   ipcMain.handle('clear-networking-config', async () => {
     customHosts.clear()
     proxyConfig = null
@@ -2184,15 +2287,46 @@ app.whenReady().then(() => {
       return result
     } catch (e) {
       logError(`FETCH FAIL (primary): ${url}  ${e.message}  stack=${(e.stack||'').substring(0,200)}`)
-      // Fallback: retry with Chrome UA if primary request failed
+      // Fallback: retry with PC Chrome UA if primary (OkHttp/Android) request failed
       try {
-        const fallbackHeaders = { ...headers, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' }
+        const fallbackHeaders = { ...headers, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
         logWarn(`FETCH RETRY (fallback UA): ${url}`)
         const result = await fetchUrlWithDns(url, fallbackHeaders, 8)
         debugLog(`FETCH OK (fallback): ${url} size=${(result||'').length}`)
         return result
       } catch (e2) {
         logError(`FETCH FAIL (fallback): ${url}  ${e2.message}  stack=${(e2.stack||'').substring(0,200)}`)
+
+        // GitHub mirror fallback: strip proxy → direct → mirrors
+        const { strippedUrl, wasProxied } = stripGhProxy(url)
+        const isGitHubUrl = wasProxied || /^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\/.+/i.test(strippedUrl)
+        if (isGitHubUrl) {
+          if (wasProxied && strippedUrl !== url) {
+            logWarn(`FETCH RETRY (gh direct): ${strippedUrl}`)
+            try {
+              const result = await fetchUrlWithDns(strippedUrl, headers, 8)
+              debugLog(`FETCH OK (gh direct): ${strippedUrl} size=${(result||'').length}`)
+              return result
+            } catch (_) {
+              logError(`FETCH FAIL (gh direct): ${strippedUrl}`)
+            }
+          }
+
+          // Speed-test all mirrors concurrently, pick top 2 fastest
+          const fastMirrors = await getFastestGitHubMirrors()
+          for (const mirror of fastMirrors) {
+            const mirrorUrl = mirror + strippedUrl
+            logWarn(`FETCH RETRY (gh mirror top2): ${mirrorUrl}`)
+            try {
+              const result = await fetchUrlWithDns(mirrorUrl, headers, 8)
+              debugLog(`FETCH OK (gh mirror top2): ${mirrorUrl} size=${(result||'').length}`)
+              return result
+            } catch (_) {
+              logError(`FETCH FAIL (gh mirror top2): ${mirrorUrl}`)
+            }
+          }
+        }
+
         throw e2
       }
     }
@@ -2374,8 +2508,8 @@ app.whenReady().then(() => {
   })
 
   // --- Create stream session (resolve URL + start proxy) ---
-  ipcMain.handle('create-stream-session', async (_event, url, headers, detectedFormat) => {
-    logDebug(`IPC create-stream-session: url=${(url||'').substring(0, 80)} fmt=${detectedFormat || 'auto'}`)
+  ipcMain.handle('create-stream-session', async (_event, url, headers, detectedFormat, preferIpv6) => {
+    logDebug(`IPC create-stream-session: url=${(url||'').substring(0, 80)} fmt=${detectedFormat || 'auto'} ipv6=${!!preferIpv6}`)
     await startProxyServer()
     let resolvedUrl = url
     let format = detectedFormat || 'unknown'
@@ -3688,7 +3822,10 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
   // ============ FFmpeg IPC handlers ============
   const { spawn, execFile } = require('child_process')
   const ffmpegSessions = new Map()
+  const mpvSessions = new Map()
+  const vlcSessions = new Map()
   let cachedFFmpegPath = null
+  let cachedMpvPath = null
 
   function probeDuration(ffprobePath, filePath) {
     return new Promise((resolve) => {
@@ -3753,14 +3890,8 @@ ipcMain.handle('close-stream-session', async (_event, sessionId) => {
     let inputUrl = sourceUrl
     let isLocalFile = false
     if (sourceUrl.startsWith('file://')) {
-      try {
-        let filePath = decodeURIComponent(sourceUrl.replace(/^file:\/\//, ''))
-        if (filePath.startsWith('/') && filePath.length > 2 && filePath.charAt(2) === ':') {
-          filePath = filePath.substring(1)
-        }
-        inputUrl = filePath
-        isLocalFile = true
-      } catch (_) {}
+      inputUrl = normalizeFileUrl(sourceUrl)
+      isLocalFile = true
     }
 
     logInfo(`FFMPEG: createSession sourceUrl=${sourceUrl} inputUrl=${inputUrl} isLocalFile=${isLocalFile} seekTime=${seekTime}`)
@@ -3858,6 +3989,9 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
         if (stderrLines.length > 200) stderrLines.shift()
       }
       debugLog(`FFMPEG: [stderr] ${text.trim().substring(0, 1000)}`)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ffmpeg:stderr', { sessionId, lines: lines.filter(l => l.trim()) })
+      }
       const errorKeywords = ['error', 'Error', 'ERROR', 'Invalid', 'failed', 'Failed', 'FAILED', 'No such', 'Permission denied', 'Unable', 'not found', 'Unsupported']
       const trimmed = text.trim()
       if (errorKeywords.some(kw => trimmed.includes(kw))) {
@@ -4023,6 +4157,243 @@ logInfo(`FFMPEG: input=${inputUrl}, sessionId=${sessionId}, isLocal=${isLocalFil
     return true
   })
 
+  // ============ MPV 弹窗播放 ============
+
+  function normalizeFileUrl(fileUrl) {
+    let p = decodeURIComponent(fileUrl.replace(/^file:\/\/+/, ''))
+    if (process.platform === 'win32') {
+      p = p.replace(/^\/+/, '')
+    }
+    return p
+  }
+
+  ipcMain.handle('mpv:selectPath', async (_event) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 MPV 可执行文件',
+      filters: [
+        { name: 'MPV 可执行文件', extensions: process.platform === 'win32' ? ['exe'] : ['*'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, path: '' }
+    }
+    return { success: true, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle('mpv:test', async (_event, mpvPath) => {
+    return new Promise((resolve) => {
+      execFile(mpvPath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, version: '', error: err.message || String(err) })
+          return
+        }
+        const output = stdout || stderr || ''
+        const match = output.match(/mpv\s+(\S+)/i)
+        const version = match ? match[1] : ''
+        resolve({ success: true, version })
+      })
+    })
+  })
+
+  ipcMain.handle('mpv:createSession', async (_event, sourceUrl, headers, mpvPath, seekTime) => {
+    logInfo(`MPV: createSession src=${(sourceUrl || '').substring(0, 80)} seek=${seekTime || 0}`)
+    const sessionId = generateId()
+    const isLocalFile = sourceUrl && sourceUrl.startsWith('file://')
+    let inputUrl = sourceUrl
+    if (isLocalFile) {
+      inputUrl = normalizeFileUrl(sourceUrl)
+    }
+
+    const args = [
+      '--force-window=yes',
+      '--keep-open=no',
+      '--no-terminal',
+    ]
+
+    if (!isLocalFile && headers && typeof headers === 'object') {
+      const ua = headers['User-Agent'] || headers['user-agent']
+      if (ua) args.push('--user-agent=' + String(ua))
+      const referer = headers['Referer'] || headers['referer']
+      if (referer) args.push('--referrer=' + String(referer))
+    }
+
+    if (seekTime && seekTime > 0) {
+      args.push('--start=' + String(seekTime))
+    }
+
+    args.push(inputUrl)
+
+    const cmdPreview = args.map(a => /\s/.test(a) ? '"' + a + '"' : a).join(' ')
+    logInfo(`MPV: spawn cmd: ${mpvPath} ${cmdPreview}`)
+
+    let mpvProc
+    try {
+      mpvProc = spawn(mpvPath, args, { stdio: 'ignore' })
+    } catch (e) {
+      logError(`MPV: spawn failed, error=${e.message}`)
+      return { success: false, error: 'spawn failed: ' + e.message }
+    }
+
+    const session = {
+      active: true,
+      proc: mpvProc,
+      sessionId,
+      sourceUrl,
+      startTime: Date.now(),
+    }
+    mpvSessions.set(sessionId, session)
+
+    logInfo(`MPV: process spawned, pid=${mpvProc.pid}, sessionId=${sessionId}, activeSessions=${mpvSessions.size}`)
+
+    mpvProc.on('error', (err) => {
+      logError(`MPV: spawn ERROR, sessionId=${sessionId}, error=${err.message}`)
+      session.active = false
+      mpvSessions.delete(sessionId)
+    })
+
+    mpvProc.on('close', (code) => {
+      logInfo(`MPV: ${sessionId} exited, code=${code}`)
+      session.active = false
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('mpv:playbackEnded', { sessionId, exitCode: code })
+      }
+      try { mpvSessions.delete(sessionId) } catch (_) {}
+    })
+
+    return { success: true, sessionId }
+  })
+
+  ipcMain.handle('mpv:closeSession', async (_event, sessionId) => {
+    const session = mpvSessions.get(sessionId)
+    if (session) {
+      session.active = false
+      try { session.proc.kill('SIGTERM') } catch (_) {}
+      mpvSessions.delete(sessionId)
+      logInfo(`MPV SESSION CLOSE: ${sessionId}`)
+    }
+    return true
+  })
+
+  // ============ VLC 弹窗播放 ============
+
+  ipcMain.handle('vlc:selectPath', async (_event) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 VLC 可执行文件',
+      filters: [
+        { name: 'VLC 可执行文件', extensions: process.platform === 'win32' ? ['exe'] : ['*'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, path: '' }
+    }
+    return { success: true, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle('vlc:test', async (_event, vlcPath) => {
+    return new Promise((resolve) => {
+      execFile(vlcPath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, version: '', error: err.message || String(err) })
+          return
+        }
+        const output = stdout || stderr || ''
+        const match = output.match(/VLC media player\s+(\S+)/i) || output.match(/(\d+\.\d+\.\d+)/)
+        const version = match ? match[1] : output.split('\n')[0]
+        resolve({ success: true, version })
+      })
+    })
+  })
+
+  ipcMain.handle('vlc:createSession', async (_event, sourceUrl, headers, vlcPath, seekTime) => {
+    logInfo(`VLC: createSession src=${(sourceUrl || '').substring(0, 80)} seek=${seekTime || 0}`)
+    const sessionId = generateId()
+    const isLocalFile = sourceUrl && sourceUrl.startsWith('file://')
+    let inputUrl = sourceUrl
+    if (isLocalFile) {
+      let filePath = normalizeFileUrl(sourceUrl)
+      if (process.platform === 'win32') {
+        filePath = path.normalize(filePath)
+      }
+      inputUrl = filePath
+    }
+
+    const args = [
+      '--play-and-exit',
+      '--no-video-title-show',
+      '--no-qt-privacy-ask',
+    ]
+
+    if (!isLocalFile) {
+      if (headers && typeof headers === 'object') {
+        const ua = headers['User-Agent'] || headers['user-agent']
+        if (ua) args.push('--http-user-agent', String(ua))
+        const referer = headers['Referer'] || headers['referer']
+        if (referer) args.push('--http-referrer', String(referer))
+      }
+      args.push('--network-caching=3000')
+    }
+
+    if (seekTime && seekTime > 0) {
+      args.push('--start-time=' + String(seekTime))
+    }
+
+    args.push(inputUrl)
+
+    const cmdPreview = args.map(a => /\s/.test(a) ? '"' + a + '"' : a).join(' ')
+    logInfo(`VLC: spawn cmd: ${vlcPath} ${cmdPreview}`)
+
+    let vlcProc
+    try {
+      vlcProc = spawn(vlcPath, args, { stdio: 'ignore' })
+    } catch (e) {
+      logError(`VLC: spawn failed, error=${e.message}`)
+      return { success: false, error: 'spawn failed: ' + e.message }
+    }
+
+    const session = {
+      active: true,
+      proc: vlcProc,
+      sessionId,
+      sourceUrl,
+      startTime: Date.now(),
+    }
+    vlcSessions.set(sessionId, session)
+
+    logInfo(`VLC: process spawned, pid=${vlcProc.pid}, sessionId=${sessionId}, activeSessions=${vlcSessions.size}`)
+
+    vlcProc.on('error', (err) => {
+      logError(`VLC: spawn ERROR, sessionId=${sessionId}, error=${err.message}`)
+      session.active = false
+      vlcSessions.delete(sessionId)
+    })
+
+    vlcProc.on('close', (code) => {
+      logInfo(`VLC: ${sessionId} exited, code=${code}`)
+      session.active = false
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('vlc:playbackEnded', { sessionId, exitCode: code })
+      }
+      try { vlcSessions.delete(sessionId) } catch (_) {}
+    })
+
+    return { success: true, sessionId }
+  })
+
+  ipcMain.handle('vlc:closeSession', async (_event, sessionId) => {
+    const session = vlcSessions.get(sessionId)
+    if (session) {
+      session.active = false
+      try { session.proc.kill('SIGTERM') } catch (_) {}
+      vlcSessions.delete(sessionId)
+      logInfo(`VLC SESSION CLOSE: ${sessionId}`)
+    }
+    return true
+  })
+
   // ============ 录屏模块 ============
   // 录屏数据从渲染进程流式写入（MediaRecorder 通过 video.captureStream() 捕获，
   // 直接从 video 元素抓取原始解码画面+音频，不包含任何 UI 遮挡层）
@@ -4129,6 +4500,16 @@ app.on('window-all-closed', () => {
     try { fs.server.close() } catch (_) {}
   }
   ffmpegSessions.clear()
+  for (const [id, ms] of mpvSessions) {
+    ms.active = false
+    try { ms.proc.kill('SIGTERM') } catch (_) {}
+  }
+  mpvSessions.clear()
+  for (const [id, vs] of vlcSessions) {
+    vs.active = false
+    try { vs.proc.kill('SIGTERM') } catch (_) {}
+  }
+  vlcSessions.clear()
   if (proxyServer) {
     try { proxyServer.close() } catch (_) {}
     proxyServer = null

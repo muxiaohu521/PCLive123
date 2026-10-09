@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { ChannelService } from '@/services/ChannelService'
 import { logger } from '@/utils/logger'
-import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI } from '@/constants'
+import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI, SUPPORTED_VIDEO_EXTENSIONS } from '@/constants'
 import type { SourceItem, DecodeMode, LocalVideoItem, LocalVideoBranch, PlayMode } from '@/constants'
 import type { LiveChannelGroup, LiveChannelItem, LiveSourceGroup } from '@/models/LiveChannelItem'
 import type { GeoInfo } from '@/utils/GeoService'
@@ -139,7 +139,7 @@ function loadVolume(): number {
 
 function loadDecodeMode(): DecodeMode {
   const raw = localStorage.getItem(STORAGE_KEYS.DECODE_MODE)
-  if (raw === 'hardware' || raw === 'software' || raw === 'auto' || raw === 'ffmpeg') return raw
+  if (raw === 'hardware' || raw === 'software' || raw === 'auto' || raw === 'mpv' || raw === 'vlc' || raw === 'ffmpeg') return raw
   return 'auto'
 }
 
@@ -156,6 +156,33 @@ function saveFfmpegPath(path: string): void {
     localStorage.setItem(STORAGE_KEYS.FFMPEG_PATH, path)
   } else {
     localStorage.removeItem(STORAGE_KEYS.FFMPEG_PATH)
+  }
+}
+
+function loadMpvPath(): string {
+  const val = localStorage.getItem(STORAGE_KEYS.MPV_PATH) || ''
+  logger.info(`[Store] loadMpvPath: ${val ? val : '(empty)'}`)
+  return val
+}
+
+function saveMpvPath(path: string): void {
+  logger.info(`[Store] saveMpvPath: ${path ? path : '(cleared)'}`)
+  if (path) {
+    localStorage.setItem(STORAGE_KEYS.MPV_PATH, path)
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.MPV_PATH)
+  }
+}
+
+function loadVlcPath(): string {
+  return localStorage.getItem(STORAGE_KEYS.VLC_PATH) || ''
+}
+
+function saveVlcPath(path: string): void {
+  if (path) {
+    localStorage.setItem(STORAGE_KEYS.VLC_PATH, path)
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.VLC_PATH)
   }
 }
 
@@ -300,10 +327,13 @@ export const useAppStore = defineStore('app', () => {
   const yspChannels = ref<YspChannelItem[]>([])
   const yspWebviewUrl = ref<string>('')
   const yspWebviewTitle = ref<string>('')
+  const mpvActive = ref(false)
   const showLocalChannelsList = ref(false)
   const activeLocalLiveChannelIndex = ref(-1)
   const decodeMode = ref<DecodeMode>(loadDecodeMode())
   const ffmpegPath = ref<string>(loadFfmpegPath())
+  const mpvPath = ref<string>(loadMpvPath())
+  const vlcPath = ref<string>(loadVlcPath())
   const localVideoBranches = ref<LocalVideoBranch[]>(loadLocalVideoBranches())
   const activeLocalVideoBranchId = ref<string>(initActiveBranchId())
 
@@ -452,6 +482,16 @@ function _doPersistSourceStats(): void {
     }
   }
 
+  function openMpv(): void {
+    mpvActive.value = true
+    logger.info('[Store] openMpv: MPV active')
+  }
+
+  function closeMpv(): void {
+    logger.info(`[Store] closeMpv: was active=${mpvActive.value}`)
+    mpvActive.value = false
+  }
+
   function setDecodeMode(mode: DecodeMode): void {
     decodeMode.value = mode
     saveDecodeMode(mode)
@@ -460,6 +500,17 @@ function _doPersistSourceStats(): void {
   function setFfmpegPath(path: string): void {
     ffmpegPath.value = path
     saveFfmpegPath(path)
+  }
+
+  function setMpvPath(path: string): void {
+    logger.info(`[Store] setMpvPath: ${path ? path : '(cleared)'}, previous: ${mpvPath.value ? mpvPath.value : '(empty)'}`)
+    mpvPath.value = path
+    saveMpvPath(path)
+  }
+
+  function setVlcPath(path: string): void {
+    vlcPath.value = path
+    saveVlcPath(path)
   }
 
   const subtitleStyleVersion = ref(0)
@@ -501,7 +552,12 @@ function _doPersistSourceStats(): void {
 
   async function parseSourceStat(source: SourceItem, signal?: AbortSignal): Promise<number> {
     try {
-      const groups = await ChannelService.loadChannels(source.url, 0, undefined, undefined, signal, true)
+      const groups = await ChannelService.loadChannelsRobust(source.url, {
+        signal,
+        skipCache: true,
+        maxRetries: 2,
+        clearSeen: false,
+      })
       if (signal?.aborted) return -1
       const totalCh = groups.reduce((sum, g) => sum + g.liveChannels.length, 0)
       sourceStats.value.set(source.url, { channelCount: totalCh, parsedAt: Date.now() })
@@ -514,8 +570,6 @@ function _doPersistSourceStats(): void {
       return 0
     }
   }
-
-  const MAX_RETRIES = 2
 
   async function runConnectivityTest(mode: 'all' | 'unparsed'): Promise<void> {
     if (connectivityTesting.value) return
@@ -556,21 +610,10 @@ function _doPersistSourceStats(): void {
         }
         await yieldTick()
 
-        let result = 0
-        for (let retry = 0; retry <= MAX_RETRIES; retry++) {
-          if (connSignal.aborted) break
-          try {
-            result = await parseSourceStat(s, connSignal)
-          } catch {
-            result = 0
-          }
-          if (result > 0) break
-        }
+        const result = await parseSourceStat(s, connSignal)
+        if (connSignal.aborted) break
 
-        if (!connSignal.aborted && result === 0) {
-          sourceStats.value.set(s.url, { channelCount: 0, parsedAt: Date.now() })
-          persistSourceStats()
-        }
+        if (result === -1) break
       }
 
       flushSourceStats()
@@ -657,7 +700,6 @@ function _doPersistSourceStats(): void {
     loadAbortController?.abort()
     loadAbortController = new AbortController()
     loadingSourceUrl = targetUrl
-    ChannelService.clearSeenUrls()
     channelsLoading.value = true
     const signal = loadAbortController.signal
     const myController = loadAbortController
@@ -669,13 +711,17 @@ function _doPersistSourceStats(): void {
       currentLivesIndex.value = idx
       channelGroups.value = []
       sourceError.value = ''
-      const result = await ChannelService.loadChannels(
+      const result = await ChannelService.loadChannelsRobust(
         targetUrl,
-        0,
-        livesGroups,
-        channelGroups,
-        signal,
-        skipCache,
+        {
+          sourceIndex: 0,
+          livesGroupsRef: livesGroups,
+          channelGroupsRef: channelGroups,
+          signal,
+          skipCache,
+          maxRetries: 2,
+          clearSeen: true,
+        },
       )
       if (result.length > 0) {
         currentGroupIndex.value = 0
@@ -820,7 +866,11 @@ function _doPersistSourceStats(): void {
     const branch = _activeBranch()
     if (!branch) return 0
     const existingPaths = new Set(branch.videos.map(v => v.filePath))
-    const newVideos = videos.filter(v => !existingPaths.has(v.filePath))
+    const newVideos = videos.filter(v => {
+      if (existingPaths.has(v.filePath)) return false
+      const ext = v.filePath.substring(v.filePath.lastIndexOf('.')).toLowerCase()
+      return (SUPPORTED_VIDEO_EXTENSIONS as readonly string[]).includes(ext)
+    })
     if (newVideos.length > 0) {
       branch.videos.push(...newVideos)
       sortBranchVideos(branch)
@@ -1368,6 +1418,8 @@ function _doPersistSourceStats(): void {
     showSettings,
     decodeMode,
     ffmpegPath,
+    mpvPath,
+    vlcPath,
     localVideoList,
     localVideoBranches,
     activeLocalVideoBranchId,
@@ -1394,6 +1446,8 @@ function _doPersistSourceStats(): void {
     clearExternalPlay,
     setDecodeMode,
     setFfmpegPath,
+    setMpvPath,
+    setVlcPath,
     subtitleStyleVersion,
     bumpSubtitleStyleVersion,
     addLocalVideos,
@@ -1426,6 +1480,9 @@ function _doPersistSourceStats(): void {
     saveYspChannels,
     yspWebviewUrl,
     yspWebviewTitle,
+    mpvActive,
+    openMpv,
+    closeMpv,
     // 快捷键
     shortcuts,
     matchShortcut,

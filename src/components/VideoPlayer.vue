@@ -27,11 +27,12 @@ import {
   isDirectFormat,
   isUnsupportedProtocol,
   isRedirectGateway,
-  guessFormatFromGatewayPath,
-  probeFinalFormat,
+  probeGatewayFormat,
+probeFinalFormat,
 } from '@/services/FormatDetector'
 import { useSubtitle } from '@/composables/useSubtitle'
 import { useMirrorStream } from '@/composables/useMirrorStream'
+import { hasIpv6Hint } from '@/models/LiveChannelItem'
 
 // ── Props / Emits ──
 
@@ -66,6 +67,19 @@ const store = useAppStore()
 
 const sessionManager = new StreamSessionManager()
 const networkInterceptor = new NetworkInterceptor()
+
+async function computePreferIpv6(url: string): Promise<boolean> {
+  if (store.activePlayMode !== 'channel') return false
+  const api = window.electronAPI
+  if (!api?.hasIpv6) return false
+  const ch = store.currentChannel
+  if (!ch) return false
+  const srcName = ch.channelSourceNames[ch.sourceIndex] || ''
+  const group = store.currentGroup
+  const hasHint = hasIpv6Hint(url, srcName, ch.channelName, group?.groupName || '', group?.subLineName || '')
+  if (!hasHint) return false
+  try { return await api.hasIpv6() } catch { return false }
+}
 
 const {
   subtitleEnabled,
@@ -116,12 +130,16 @@ let lastLoadUrl = ''
 let lastLoadHeaders: Record<string, string> = {}
 
 const MAX_RETRIES_PER_LINE = 3
+const AUTO_SAFETY_TIMEOUT_MS = 25000
 const SOURCE_TIMEOUT_MS = 10000
 let loadGenerationId = 0
 let lastPlayMode: 'local' | 'channel' | 'sniffer' | 'locallive' | null = null
 let lastDecodeMode: string | null = null
-let _mpegtsWatchdog: ReturnType<typeof setTimeout> | null = null
 let _stallWatchdog: ReturnType<typeof setTimeout> | null = null
+let _autoSafetyTimer: ReturnType<typeof setTimeout> | null = null
+let _autoFallbackUrl: string | null = null
+let _autoFallbackHeaders: Record<string, string> | null = null
+let _autoFallbackGenId = 0
 let confirmedFormat: string | null = null
 let currentFormat = ''
 let hasEverPlayed = false
@@ -164,10 +182,25 @@ function cleanupFfmpegPatches(): void {
 }
 
 async function closeCurrentSession(): Promise<void> {
+  if (store.mpvActive) {
+    if (window.electronAPI?.mpvCloseSession) {
+      try {
+        const session = sessionManager.currentMpvSessionId
+        if (session) await window.electronAPI.mpvCloseSession(session)
+      } catch (_) {}
+    }
+    if (window.electronAPI?.vlcCloseSession) {
+      try {
+        const session = sessionManager.currentVlcSessionId
+        if (session) await window.electronAPI.vlcCloseSession(session)
+      } catch (_) {}
+    }
+    store.closeMpv()
+  }
   await sessionManager.closeAll()
   await networkInterceptor.unregister()
   cleanupFfmpegPatches()
-}
+  }
 
 function cleanupFfmpegSeek(): void {
   if (_ffmpegSeekCleanup) {
@@ -225,6 +258,78 @@ function startSourceTimeout(): void {
   }, SOURCE_TIMEOUT_MS)
 }
 
+// ── 统一自动回退 (MPV→VLC→FFmpeg) ──
+
+function clearAutoSafetyTimer(): void {
+  if (_autoSafetyTimer !== null) {
+    clearTimeout(_autoSafetyTimer)
+    _autoSafetyTimer = null
+  }
+}
+
+async function triggerAutoFallback(): Promise<boolean> {
+  const url = _autoFallbackUrl
+  const headers = _autoFallbackHeaders
+  const genId = _autoFallbackGenId
+  if (!url || !headers || genId !== loadGenerationId) return false
+
+  clearAutoSafetyTimer()
+  clearSourceTimeout()
+
+  const video = art?.video as HTMLVideoElement | undefined
+  if (video) {
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
+    disposeHlsFlvAudio(video)
+  }
+  disposeAudioPlayer()
+
+  logger.info('[VideoPlayer] auto: 回退链 MPV→VLC→FFmpeg')
+
+  if (store.mpvPath) {
+    const ok = await startMpv(url, headers, store.mpvPath, genId, loadGenerationId, true)
+    if (ok) return true
+    if (genId !== loadGenerationId) return false
+  }
+
+  if (store.vlcPath) {
+    const ok = await startVlc(url, headers, store.vlcPath, genId, loadGenerationId, true)
+    if (ok) return true
+    if (genId !== loadGenerationId) return false
+  }
+
+  if (store.ffmpegPath) {
+    logger.info('[VideoPlayer] auto: → FFmpeg 回退')
+    try {
+      const result = await sessionManager.createFfmpegSession(url, headers, store.ffmpegPath)
+      if (genId !== loadGenerationId) return false
+      if (result && result.success && result.proxyUrl && art) {
+        currentFormat = 'mp4'
+        const vid = art.video as HTMLVideoElement
+        vid.src = result.proxyUrl
+        vid.play().catch(() => {})
+        hasEverPlayed = true
+        if (getIsMirroring()) restartMirrorStream(art)
+        return true
+      }
+    } catch (e) {
+      logger.warn('[VideoPlayer] auto: FFmpeg 回退失败:', e)
+    }
+  }
+  return false
+}
+
+function startAutoSafetyTimer(): void {
+  clearAutoSafetyTimer()
+  _autoSafetyTimer = setTimeout(async () => {
+    _autoSafetyTimer = null
+    if (hasEverPlayed) return
+    logger.warn('[VideoPlayer] auto: 安全超时 (' + AUTO_SAFETY_TIMEOUT_MS + 'ms), 触发回退链')
+    await triggerAutoFallback()
+  }, AUTO_SAFETY_TIMEOUT_MS)
+}
+
 // ── UI 控件 ──
 
 function updateSourceLabel(): void {
@@ -256,7 +361,6 @@ function updateControlLabels(): void {
     setDisp('prev-source', false)
     setDisp('source-info', false)
     setDisp('next-source', false)
-    setDisp('play-mode', false)
     setDisp('subtitle-cc', true)
     setDisp('float-window', false)
     return
@@ -269,7 +373,6 @@ function updateControlLabels(): void {
   setDisp('prev-source', mode === 'channel' || mode === 'locallive')
   setDisp('source-info', mode === 'channel' || mode === 'locallive')
   setDisp('next-source', mode === 'channel' || mode === 'locallive')
-  setDisp('play-mode', mode === 'local')
   setDisp('subtitle-cc', mode !== 'channel' && mode !== 'locallive')
   setDisp('float-window', true)
 
@@ -289,6 +392,8 @@ function getDecodeLabel(): string {
   const mode = store.decodeMode
   if (mode === 'hardware') return '硬解'
   if (mode === 'software') return '软解'
+  if (mode === 'mpv') return 'MPV'
+  if (mode === 'vlc') return 'VLC'
   if (mode === 'ffmpeg') return 'FFmpeg'
   return '自动'
 }
@@ -297,42 +402,11 @@ function getPlayModeLabel(): string {
   return PLAY_MODE_LABELS[store.localPlayMode] || '顺序播放'
 }
 
-function cyclePlayMode(): PlayMode {
-  const order: PlayMode[] = ['sequential', 'single_loop', 'random']
-  const idx = order.indexOf(store.localPlayMode)
-  return order[(idx + 1) % order.length]
-}
-
-function togglePlayMode(): void {
-  if (store.activePlayMode !== 'local') return
-  const next = cyclePlayMode()
-  store.setLocalPlayMode(next)
-  updatePlayModeButton()
-}
-
 function updatePlayModeButton(): void {
   if (!art) return
   const outer = art.controls['play-mode'] as HTMLElement | undefined
   const el = outer?.querySelector('.pclive-playmode-btn') as HTMLElement | null
   if (el) el.textContent = getPlayModeLabel()
-}
-
-function cycleDecodeMode(): DecodeMode {
-  const order: DecodeMode[] = ['auto', 'hardware', 'software', 'ffmpeg']
-  const idx = order.indexOf(store.decodeMode)
-  return order[(idx + 1) % order.length]
-}
-
-function toggleDecodeMode(): void {
-  const next = cycleDecodeMode()
-  store.setDecodeMode(next)
-  updateDecodeButton()
-  if (lastLoadUrl && art) {
-    logger.info(`[VideoPlayer] decode mode switched to: ${next}, reloading: ${lastLoadUrl.substring(0, 100)}`)
-    loadUrl(lastLoadUrl, lastLoadHeaders)
-  } else {
-    logger.info(`[VideoPlayer] decode mode switched to: ${next} (no URL loaded, button updated only)`)
-  }
 }
 
 function updateDecodeButton(): void {
@@ -346,7 +420,94 @@ function updateDecodeButton(): void {
   if (mode === 'hardware') span.className += ' decode-hw'
   else if (mode === 'software') span.className += ' decode-sw'
   else if (mode === 'ffmpeg') span.className += ' decode-ff'
+  else if (mode === 'mpv') span.className += ' decode-mpv'
+  else if (mode === 'vlc') span.className += ' decode-vlc'
   else span.className += ' decode-auto'
+  if (outer) outer.title = '选择解码模式'
+}
+
+// ── 弹出菜单 ──
+
+interface PopupItem {
+  label: string
+  value: string
+  active: boolean
+  colorClass?: string
+}
+
+let activePopup: HTMLDivElement | null = null
+let activePopupAnchor: HTMLElement | null = null
+
+function closePopup(): void {
+  if (activePopup) {
+    const kh = (activePopup as any).__keyHandler
+    if (kh) document.removeEventListener('keydown', kh)
+    activePopup.remove()
+    activePopup = null
+    activePopupAnchor = null
+  }
+}
+
+function showPopupMenu(anchor: HTMLElement, items: PopupItem[], onSelect: (value: string) => void): void {
+  if (activePopup && activePopupAnchor === anchor) {
+    closePopup()
+    return
+  }
+
+  closePopup()
+  activePopupAnchor = anchor
+
+  const anchorRect = anchor.getBoundingClientRect()
+
+  const overlay = document.createElement('div')
+  overlay.className = 'pclive-popup-overlay'
+  overlay.addEventListener('click', closePopup)
+  overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); closePopup() })
+
+  const popup = document.createElement('div')
+  popup.className = 'pclive-popup-menu'
+
+  for (const item of items) {
+    const el = document.createElement('div')
+    el.className = 'pclive-popup-item'
+    if (item.active) el.classList.add('active')
+    if (item.colorClass) el.classList.add(item.colorClass)
+    el.textContent = item.label
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      onSelect(item.value)
+      closePopup()
+    })
+    popup.appendChild(el)
+  }
+
+  overlay.appendChild(popup)
+  document.body.appendChild(overlay)
+  activePopup = overlay
+
+  popup.style.position = 'fixed'
+  popup.style.zIndex = '100001'
+  void popup.offsetHeight
+
+  const pw = popup.offsetWidth
+  const ph = popup.offsetHeight
+
+  let top = anchorRect.top - ph - 4
+  let left = anchorRect.left
+  if (top < 8) top = anchorRect.bottom + 4
+  if (left + pw > window.innerWidth - 8) {
+    left = window.innerWidth - pw - 8
+  }
+  if (left < 8) left = 8
+
+  popup.style.left = left + 'px'
+  popup.style.top = top + 'px'
+
+  const keyHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') closePopup()
+  }
+  document.addEventListener('keydown', keyHandler);
+  (overlay as any).__keyHandler = keyHandler
 }
 
 function updateSubtitleIndicator(): void {
@@ -451,18 +612,59 @@ function addCustomControls(): void {
     name: 'decode-mode',
     position: 'right',
     html: `<span class="pclive-decode-btn">${getDecodeLabel()}</span>`,
-    tooltip: '切换解码模式 (自动/硬解/软解/FFmpeg)',
+    tooltip: '选择解码模式',
     style: { fontSize: '11px', marginRight: '6px', cursor: 'pointer', fontWeight: 'bold' },
-    click() { toggleDecodeMode() },
+    click(_comp: any, _event: Event) {
+      const outer = art!.controls['decode-mode'] as HTMLElement | undefined
+      const span = outer?.querySelector('.pclive-decode-btn') as HTMLElement | null
+      if (!span) return
+
+      const items: PopupItem[] = [
+        { label: '自动', value: 'auto', active: store.decodeMode === 'auto', colorClass: 'decode-auto' },
+        { label: '硬解', value: 'hardware', active: store.decodeMode === 'hardware', colorClass: 'decode-hw' },
+        { label: '软解', value: 'software', active: store.decodeMode === 'software', colorClass: 'decode-sw' },
+      ]
+      if (store.mpvPath) items.push({ label: 'MPV', value: 'mpv', active: store.decodeMode === 'mpv', colorClass: 'decode-mpv' })
+      if (store.vlcPath) items.push({ label: 'VLC', value: 'vlc', active: store.decodeMode === 'vlc', colorClass: 'decode-vlc' })
+      if (store.ffmpegPath) items.push({ label: 'FFmpeg', value: 'ffmpeg', active: store.decodeMode === 'ffmpeg', colorClass: 'decode-ff' })
+
+      showPopupMenu(span, items, (value) => {
+        const mode = value as DecodeMode
+        if (mode === store.decodeMode) return
+        store.setDecodeMode(mode)
+        updateDecodeButton()
+        if (lastLoadUrl && art) {
+          logger.info(`[VideoPlayer] decode mode switched to: ${mode}, reloading: ${lastLoadUrl.substring(0, 100)}`)
+          loadUrl(lastLoadUrl, lastLoadHeaders)
+        }
+      })
+    },
   })
 
   art.controls.add({
     name: 'play-mode',
     position: 'right',
     html: `<span class="pclive-playmode-btn">${getPlayModeLabel()}</span>`,
-    tooltip: '切换播放模式 (顺序播放/单曲循环/随机播放)',
+    tooltip: '选择播放模式',
     style: { fontSize: '11px', marginRight: '6px', cursor: 'pointer', fontWeight: 'bold' },
-    click() { togglePlayMode() },
+    click(_comp: any, _event: Event) {
+      const outer = art!.controls['play-mode'] as HTMLElement | undefined
+      const span = outer?.querySelector('.pclive-playmode-btn') as HTMLElement | null
+      if (!span) return
+
+      const items: PopupItem[] = [
+        { label: '顺序播放', value: 'sequential', active: store.localPlayMode === 'sequential' },
+        { label: '单曲循环', value: 'single_loop', active: store.localPlayMode === 'single_loop' },
+        { label: '随机播放', value: 'random', active: store.localPlayMode === 'random' },
+      ]
+
+      showPopupMenu(span, items, (value) => {
+        const mode = value as PlayMode
+        if (mode === store.localPlayMode) return
+        store.setLocalPlayMode(mode)
+        updatePlayModeButton()
+      })
+    },
   })
 
   art.controls.add({
@@ -485,10 +687,22 @@ function addCustomControls(): void {
 
   updateControlLabels()
 
-  
 }
 
 // ── 解码引擎清理 ──
+
+function disposeHlsFlvAudio(video: HTMLVideoElement | null): void {
+  disposeHls(video)
+  disposeFlv(video)
+  disposeAudioPlayer()
+}
+
+function playViaSwitchUrl(fmt: string, url: string): void {
+  art!.type = fmt
+  startSourceTimeout()
+  art!.switchUrl(url)
+  if (getIsMirroring()) restartMirrorStream(art)
+}
 
 function disposeHls(video: HTMLVideoElement | null): void {
   if (!video) return
@@ -515,10 +729,6 @@ function disposeFlv(video: HTMLVideoElement | null): void {
   if (v.flv) {
     try { v.flv.detachMediaElement(); v.flv.destroy() } catch (_e) { /* */ }
     v.flv = null
-  }
-  if (_mpegtsWatchdog) {
-    clearTimeout(_mpegtsWatchdog)
-    _mpegtsWatchdog = null
   }
 }
 
@@ -764,8 +974,21 @@ async function tryFfmpegStreamFallback(video: HTMLVideoElement, url: string): Pr
   }
   logger.info(`[VideoPlayer] auto: 回退 FFmpeg for ${url.substring(0, 120)}`)
   clearSourceTimeout()
+
+  // 网关 URL 走代理 — FFmpeg 直连 CDN 会因 Referer/Cookie 被拒 403
+  let ffmpegSourceUrl = url
+  const isGateway = isRedirectGateway(url)
+  if (isGateway) {
+    const sess = await sessionManager.createProxySession(url, capturedHeaders, 'unknown', await computePreferIpv6(url))
+    if (capturedGenId !== loadGenerationId) return
+    if (sess && sess.proxyUrl) {
+      ffmpegSourceUrl = sess.proxyUrl
+      logger.info(`[VideoPlayer] auto FFmpeg fallback: gateway via proxy ${ffmpegSourceUrl}`)
+    }
+  }
+
   try {
-    const result = await sessionManager.createFfmpegSession(url, capturedHeaders, store.ffmpegPath)
+    const result = await sessionManager.createFfmpegSession(ffmpegSourceUrl, capturedHeaders, store.ffmpegPath)
     if (capturedGenId !== loadGenerationId) return
     if (result && result.success && result.proxyUrl) {
       currentFormat = 'mp4'
@@ -886,9 +1109,7 @@ async function toLocalHttpUrl(fileUrl: string): Promise<string | null> {
 async function playLocalNative(url: string): Promise<void> {
   if (!art) return
   const video = art.video as HTMLVideoElement
-  disposeHls(video)
-  disposeFlv(video)
-  disposeAudioPlayer()
+  disposeHlsFlvAudio(video)
   await closeCurrentSession()
   currentFormat = 'mp4'
 
@@ -901,9 +1122,7 @@ async function playLocalNative(url: string): Promise<void> {
 async function playLocalSoftware(url: string, genId: number, allowFfmpegFallback: boolean = false): Promise<void> {
   if (!art) return
   const video = art.video as HTMLVideoElement
-  disposeHls(video)
-  disposeFlv(video)
-  disposeAudioPlayer()
+  disposeHlsFlvAudio(video)
   await closeCurrentSession()
 
   const ext = getLocalExt(url)
@@ -952,9 +1171,7 @@ async function playLocalSoftware(url: string, genId: number, allowFfmpegFallback
 async function playLocalFfmpeg(url: string, genId: number, seekTime?: number): Promise<void> {
   if (!art) return
   const video = art.video as HTMLVideoElement
-  disposeHls(video)
-  disposeFlv(video)
-  disposeAudioPlayer()
+  disposeHlsFlvAudio(video)
 
   video.pause()
   video.removeAttribute('src')
@@ -1045,6 +1262,145 @@ async function playLocalAudio(url: string, genId: number): Promise<void> {
   }
 }
 
+// ── MPV 弹窗播放 ──
+
+/**
+ * 启动 MPV 弹窗播放——主进程直接 spawn MPV 进程。
+ * @returns true 表示播放已启动，false 表示失败
+ */
+async function startMpv(
+  url: string,
+  headers: Record<string, string>,
+  mpvPath: string,
+  genId: number,
+  loadGenId: number,
+  isAutoFallback = false
+): Promise<boolean> {
+  logger.info(`[VideoPlayer] startMpv: url=${url.substring(0, 120)}, mpvPath=${mpvPath}, autoFallback=${isAutoFallback}`)
+  if (!window.electronAPI?.mpvCreateSession) {
+    logger.warn('[VideoPlayer] startMpv: electronAPI.mpvCreateSession not available')
+    return false
+  }
+  try {
+    const result = await window.electronAPI.mpvCreateSession(url, headers, mpvPath)
+    if (genId !== loadGenId) {
+      logger.warn('[VideoPlayer] startMpv: genId mismatch, discarding')
+      return false
+    }
+    if (!result?.success || !result.sessionId) {
+      logger.warn(`[VideoPlayer] startMpv: FAILED, error=${result?.error || 'unknown'}`)
+      return false
+    }
+    logger.info(`[VideoPlayer] startMpv: SUCCESS, sessionId=${result.sessionId}, MPV popup window spawned`)
+    sessionManager.setMpvSessionId(result.sessionId)
+    store.openMpv()
+    hasEverPlayed = true
+    store.playing = true
+    store.videoPaused = false
+    emit('playing')
+    return true
+  } catch (e) {
+    logger.warn(`[VideoPlayer] startMpv: EXCEPTION: ${e}`)
+    return false
+  }
+}
+
+/**
+ * 启动 VLC 弹窗播放（独立窗口）
+ */
+async function startVlc(
+  url: string,
+  headers: Record<string, string>,
+  vlcPath: string,
+  genId: number,
+  loadGenId: number,
+  isAutoFallback = false
+): Promise<boolean> {
+  logger.info(`[VideoPlayer] startVlc: url=${url.substring(0, 120)}, vlcPath=${vlcPath}, autoFallback=${isAutoFallback}`)
+  if (!window.electronAPI?.vlcCreateSession) {
+    logger.warn('[VideoPlayer] startVlc: electronAPI.vlcCreateSession not available')
+    return false
+  }
+  try {
+    const result = await window.electronAPI.vlcCreateSession(url, headers, vlcPath)
+    if (genId !== loadGenId) {
+      logger.warn('[VideoPlayer] startVlc: genId mismatch, discarding')
+      return false
+    }
+    if (!result?.success || !result.sessionId) {
+      logger.warn(`[VideoPlayer] startVlc: FAILED, error=${result?.error || 'unknown'}`)
+      return false
+    }
+    logger.info(`[VideoPlayer] startVlc: SUCCESS, sessionId=${result.sessionId}, VLC popup window spawned`)
+    sessionManager.setVlcSessionId(result.sessionId)
+    store.openMpv()
+    hasEverPlayed = true
+    store.playing = true
+    store.videoPaused = false
+    emit('playing')
+    return true
+  } catch (e) {
+    logger.warn(`[VideoPlayer] startVlc: EXCEPTION: ${e}`)
+    return false
+  }
+}
+
+async function playLocalMpv(url: string, genId: number): Promise<void> {
+  if (!art) {
+    logger.warn('[VideoPlayer] playLocalMpv: art is null, aborting')
+    return
+  }
+  logger.info(`[VideoPlayer] playLocalMpv: entering, url=${url.substring(0, 120)}, genId=${genId}`)
+
+  const video = art.video as HTMLVideoElement
+  disposeHlsFlvAudio(video)
+  video.pause()
+  video.removeAttribute('src')
+  video.load()
+  await closeCurrentSession()
+
+  if (!store.mpvPath) {
+    logger.warn('[VideoPlayer] playLocalMpv: mpvPath is EMPTY, cannot start MPV')
+    return
+  }
+
+  logger.info(`[VideoPlayer] playLocalMpv: launching MPV, path=${store.mpvPath}, url=${url.substring(0, 120)}`)
+
+  try {
+    await startMpv(url, {}, store.mpvPath, genId, genId)
+  } catch (e) {
+    logger.warn(`[VideoPlayer] playLocalMpv: EXCEPTION: ${e}`)
+  }
+}
+
+async function playLocalVlc(url: string, genId: number): Promise<void> {
+  if (!art) {
+    logger.warn('[VideoPlayer] playLocalVlc: art is null, aborting')
+    return
+  }
+  logger.info(`[VideoPlayer] playLocalVlc: entering, url=${url.substring(0, 120)}, genId=${genId}`)
+
+  const video = art.video as HTMLVideoElement
+  disposeHlsFlvAudio(video)
+  video.pause()
+  video.removeAttribute('src')
+  video.load()
+  await closeCurrentSession()
+
+  if (!store.vlcPath) {
+    logger.warn('[VideoPlayer] playLocalVlc: vlcPath is EMPTY, cannot start VLC')
+    return
+  }
+
+  logger.info(`[VideoPlayer] playLocalVlc: launching VLC, path=${store.vlcPath}, url=${url.substring(0, 120)}`)
+
+  try {
+    await startVlc(url, {}, store.vlcPath, genId, genId)
+  } catch (e) {
+    logger.warn(`[VideoPlayer] playLocalVlc: EXCEPTION: ${e}`)
+  }
+}
+
 let _playLocalFileGen = 0
 
 async function playLocalFile(url: string): Promise<void> {
@@ -1103,48 +1459,53 @@ async function playLocalFile(url: string): Promise<void> {
       break
     }
 
+    case 'mpv': {
+      logger.info(`[VideoPlayer] mpv: .${ext} → MPV`)
+      await playLocalMpv(url, gen)
+      if (gen !== _playLocalFileGen) return
+      break
+    }
+
+    case 'vlc': {
+      logger.info(`[VideoPlayer] vlc: .${ext} → VLC`)
+      await playLocalVlc(url, gen)
+      if (gen !== _playLocalFileGen) return
+      break
+    }
+
     default: {
+      // auto: 内置解码 (按格式) → 报错触发回退 MPV→VLC→FFmpeg
+
+      _autoFallbackUrl = url
+      _autoFallbackHeaders = {}
+      _autoFallbackGenId = gen
+
       if (isAudio) {
         logger.info(`[VideoPlayer] auto: .${ext} → 软解 (AudioPlayer)`)
         const httpUrl = await toLocalHttpUrl(url)
-        if (gen !== _playLocalFileGen) return
+        if (gen !== _playLocalFileGen) break
         await playLocalAudio(httpUrl || url, gen)
-        if (gen !== _playLocalFileGen) return
-        await new Promise(r => setTimeout(r, 3000))
-        if (gen !== _playLocalFileGen) return
-        if (!hasEverPlayed) {
-          logger.info(`[VideoPlayer] auto: 软解播放失败 .${ext}, 回退 FFmpeg`)
-          await playLocalFfmpeg(url, gen)
-          if (gen !== _playLocalFileGen) return
-        }
       } else if (isNativeVideo) {
         logger.info(`[VideoPlayer] auto: .${ext} → 硬解 (native)`)
         await playLocalNative(url)
-        if (gen !== _playLocalFileGen) return
-        await new Promise(r => setTimeout(r, 3000))
-        if (gen !== _playLocalFileGen) return
-        const video = art?.video as HTMLVideoElement | undefined
-        if (video && video.paused && video.readyState < 2) {
-          logger.info(`[VideoPlayer] auto: 硬解播放失败 .${ext}, 回退 FFmpeg`)
-          await playLocalFfmpeg(url, gen)
-          if (gen !== _playLocalFileGen) return
-        }
       } else if (isStream) {
         logger.info(`[VideoPlayer] auto: .${ext} → 软解 (hls.js/mpegts.js)`)
         await playLocalSoftware(url, gen, true)
-        if (gen !== _playLocalFileGen) return
-        await new Promise(r => setTimeout(r, 2500))
-        if (gen !== _playLocalFileGen) return
-        const video = art?.video as HTMLVideoElement | undefined
-        if (video && video.paused && video.readyState < 2) {
-          logger.info(`[VideoPlayer] auto: 软解播放失败 .${ext}, 回退 FFmpeg`)
-          await playLocalFfmpeg(url, gen)
-          if (gen !== _playLocalFileGen) return
-        }
       } else {
-        logger.info(`[VideoPlayer] auto: .${ext} → FFmpeg (格式无法识别)`)
-        await playLocalFfmpeg(url, gen)
-        if (gen !== _playLocalFileGen) return
+        logger.info(`[VideoPlayer] auto: .${ext} → 外部解码链 (格式无法识别)`)
+        if (store.mpvPath) {
+          await playLocalMpv(url, gen)
+          if (gen !== _playLocalFileGen) break
+          if (hasEverPlayed) break
+        }
+        if (store.vlcPath) {
+          await playLocalVlc(url, gen)
+          if (gen !== _playLocalFileGen) break
+          if (hasEverPlayed) break
+        }
+        if (store.ffmpegPath) {
+          await playLocalFfmpeg(url, gen)
+        }
       }
       break
     }
@@ -1156,7 +1517,6 @@ async function playLocalFile(url: string): Promise<void> {
 // ── mpegts.js 播放器 ──
 
 function loadMpegtsPlayer(video: HTMLVideoElement, url: string, format: string = 'flv', isLive: boolean = true, allowFfmpegFallback: boolean = false): void {
-  const capturedGenId = loadGenerationId
   const decodeMode = store.decodeMode
 
   if (!mpegts.isSupported || !mpegts.isSupported()) {
@@ -1200,39 +1560,8 @@ function loadMpegtsPlayer(video: HTMLVideoElement, url: string, format: string =
     }
   })
 
-  let _mpegtsMetadata = false
-  const _fallbackToMp4 = () => {
-    if (capturedGenId !== loadGenerationId) return
-    if (v.flv !== player) return
-    if (allowFfmpegFallback) {
-      logger.warn('[VideoPlayer] auto: mpegts无metadata, 回退 FFmpeg')
-      try { player.detachMediaElement(); player.destroy() } catch (_) { /* */ }
-      v.flv = null
-      disposeHls(video)
-      tryFfmpegStreamFallback(video, url)
-    } else {
-      logger.warn(`[VideoPlayer] mpegts: no metadata after 15s, ${decodeMode} mode forbids FFmpeg fallback — playback may stall`)
-    }
-  }
-
-  if (_mpegtsWatchdog) clearTimeout(_mpegtsWatchdog)
-  _mpegtsWatchdog = setTimeout(() => {
-    _mpegtsWatchdog = null
-    if (!_mpegtsMetadata) _fallbackToMp4()
-  }, 15000)
-
-  const _clearWatchdog = () => {
-    _mpegtsMetadata = true
-    if (_mpegtsWatchdog) { clearTimeout(_mpegtsWatchdog); _mpegtsWatchdog = null }
-    clearSourceTimeout()
-  }
-  player.on(mpegts.Events.METADATA_ARRIVED, _clearWatchdog)
-  player.on(mpegts.Events.MEDIA_INFO, _clearWatchdog)
-  player.on(mpegts.Events.LOADING_COMPLETE, () => {
-    if (_mpegtsWatchdog) { clearTimeout(_mpegtsWatchdog); _mpegtsWatchdog = null }
-    clearSourceTimeout()
-    if (!_mpegtsMetadata) _fallbackToMp4()
-  })
+  player.on(mpegts.Events.METADATA_ARRIVED, () => { clearSourceTimeout() })
+  player.on(mpegts.Events.MEDIA_INFO, () => { clearSourceTimeout() })
 
   player.attachMediaElement(video)
   player.load()
@@ -1486,8 +1815,13 @@ async function createPlayer(): Promise<void> {
           return
         }
 
-        logger.info('[VideoPlayer] auto: FLV → FFmpeg')
-        tryFfmpegStreamFallback(video, url)
+        logger.info('[VideoPlayer] auto: FLV → 软解 (mpegts.js)')
+        try {
+          loadMpegtsPlayer(video, url, 'flv', true, true)
+        } catch (e) {
+          logger.error('[VideoPlayer] auto mode: mpegts(flv) init error:', e)
+          tryFfmpegStreamFallback(video, url)
+        }
       },
       ts(video: HTMLVideoElement, url: string) {
         disposeHls(video)
@@ -1536,8 +1870,8 @@ async function createPlayer(): Promise<void> {
 
   addCustomControls()
 
-  art.on('ready', () => { clearLoadTimer(); clearSourceTimeout(); loadRetries = 0; loadGenerationId++; confirmedFormat = currentFormat; updateSubtitleIndicator() })
-  art.on('play', () => { clearLoadTimer(); clearSourceTimeout(); clearStallWatchdog(); hasEverPlayed = true; emit('playing') })
+  art.on('ready', () => { clearSourceTimeout(); loadRetries = 0; loadGenerationId++; confirmedFormat = currentFormat; updateSubtitleIndicator() })
+  art.on('play', () => { clearSourceTimeout(); clearStallWatchdog(); clearAutoSafetyTimer(); hasEverPlayed = true; emit('playing') })
   art.on('pause', () => { if (!art?.playing) emit('pause') })
   art.on('ended', () => {
     if (_localEndedFired) return
@@ -1547,12 +1881,11 @@ async function createPlayer(): Promise<void> {
       logger.warn('[VideoPlayer] global ended ignored (FFmpeg premature end, duration < 2s, not yet played)')
       return
     }
-    console.log('[VP] art ended')
+    logger.info('[VideoPlayer] art ended')
     emit('ended')
   })
 
   art.on('error', () => {
-    clearLoadTimer()
     if (_errorRetryTimer) { clearTimeout(_errorRetryTimer); _errorRetryTimer = null }
 
     if (hasEverPlayed && lastLoadUrl) {
@@ -1566,6 +1899,12 @@ async function createPlayer(): Promise<void> {
         if (capturedGenId !== loadGenerationId) return
         loadUrl(retryUrl, retryHeaders)
       }, delay)
+      return
+    }
+
+    if (store.decodeMode === 'auto' && !hasEverPlayed && _autoFallbackUrl) {
+      logger.warn('[VideoPlayer] auto: error before play, 触发回退链')
+      triggerAutoFallback().catch(() => {})
       return
     }
 
@@ -1619,8 +1958,6 @@ async function createPlayer(): Promise<void> {
 
 // ── 核心加载逻辑 ──
 
-function clearLoadTimer(): void { /* no-op: timeout disabled */ }
-
 function stopCurrentPlayback(): void {
   if (!art) return
   const video = art.video as HTMLVideoElement | null
@@ -1643,11 +1980,10 @@ function stopCurrentPlayback(): void {
 
 async function loadUrl(url: string, headers: Record<string, string>): Promise<void> {
   if (!art || !url) return
-  clearLoadTimer()
   clearSourceTimeout()
   clearStallWatchdog()
+  clearAutoSafetyTimer()
   if (_errorRetryTimer) { clearTimeout(_errorRetryTimer); _errorRetryTimer = null }
-  if (_mpegtsWatchdog) { clearTimeout(_mpegtsWatchdog); _mpegtsWatchdog = null }
   const modeChanged = lastPlayMode !== null && lastPlayMode !== store.activePlayMode
   const decodeChanged = lastDecodeMode !== null && lastDecodeMode !== store.decodeMode
   const isNewUrl = url !== lastLoadUrl
@@ -1722,132 +2058,10 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     } catch (_) {}
   }
 
-  if (store.decodeMode === 'ffmpeg') {
-    if (!store.ffmpegPath) {
-      logger.warn('[VideoPlayer] FFmpeg mode: ffmpeg not available, FFmpeg mode forbids native/software fallback')
-      return
-    }
-    await closeCurrentSession()
-    disposeAudioPlayer()
-    try {
-      let ffInputFormat: string | undefined = undefined
-      if (isRedirectGateway(url)) {
-        ffInputFormat = guessFormatFromGatewayPath(url) || undefined
-        if (ffInputFormat) {
-          logger.info(`[VideoPlayer] FFmpeg: detected format hint=${ffInputFormat} for gateway ${url.substring(0, 80)}`)
-        }
-      }
-      logger.info(`[VideoPlayer] FFmpeg: creating session for ${url.substring(0, 120)}`)
-      const result = await sessionManager.createFfmpegSession(url, headers, store.ffmpegPath, undefined, ffInputFormat)
-      if (genId !== loadGenerationId) return
-      if (result && result.success && result.proxyUrl && art) {
-        currentFormat = 'mp4'
-        const video = art.video as HTMLVideoElement
-        logger.info(`[VideoPlayer] FFmpeg: session created, proxyUrl=${result.proxyUrl}, duration=${result.duration}`)
-        video.src = result.proxyUrl
-
-        // ── 视频事件诊断 ──
-        const diagGenId = genId
-        const onProgress = () => {
-          if (diagGenId !== loadGenerationId) return
-          const buffered = video.buffered
-          const lastEnd = buffered.length > 0 ? buffered.end(buffered.length - 1) : 0
-          const lastDur = lastEnd > 0 ? lastEnd.toFixed(1) : '0'
-          logger.info(`[VideoPlayer] FFmpeg: buffered up to ${lastDur}s, readyState=${video.readyState}, networkState=${video.networkState}`)
-        }
-        const onStalled = () => {
-          if (diagGenId !== loadGenerationId) return
-          logger.warn(`[VideoPlayer] FFmpeg: STALLED (download not progressing), readyState=${video.readyState}, currentTime=${video.currentTime.toFixed(2)}`)
-        }
-        const onSuspend = () => {
-          if (diagGenId !== loadGenerationId) return
-          logger.info(`[VideoPlayer] FFmpeg: SUSPEND (download paused by browser), readyState=${video.readyState}`)
-        }
-        const onEnded = () => {
-          if (diagGenId !== loadGenerationId) return
-          logger.warn(`[VideoPlayer] FFmpeg: ENDED unexpectedly, currentTime=${video.currentTime.toFixed(2)}, duration=${video.duration}`)
-          if (!hasEverPlayed && video.duration < 1 && video.readyState === HTMLMediaElement.HAVE_ENOUGH_DATA) {
-            logger.warn('[VideoPlayer] FFmpeg: premature ENDED (duration < 1s, no playback yet), retrying play() after 300ms')
-            setTimeout(() => {
-              if (diagGenId === loadGenerationId && video.src === result.proxyUrl) {
-                video.play().then(() => {
-                  logger.info('[VideoPlayer] FFmpeg: play() retry after premature ENDED succeeded')
-                  hasEverPlayed = true
-                }).catch(() => {})
-              }
-            }, 300)
-          }
-        }
-        const onTimeUpdate = () => {
-          if (diagGenId !== loadGenerationId) return
-          if (Math.abs(video.currentTime - _ffmpegDiagLastTime) > 1) {
-            _ffmpegDiagLastTime = video.currentTime
-            logger.info(`[VideoPlayer] FFmpeg: timeupdate → currentTime=${video.currentTime.toFixed(2)}s`)
-          }
-        }
-        let _ffmpegDiagLastTime = -999
-        video.addEventListener('progress', onProgress)
-        video.addEventListener('stalled', onStalled)
-        video.addEventListener('suspend', onSuspend)
-        video.addEventListener('ended', onEnded)
-        video.addEventListener('timeupdate', onTimeUpdate)
-        const removeDiagListeners = () => {
-          video.removeEventListener('progress', onProgress)
-          video.removeEventListener('stalled', onStalled)
-          video.removeEventListener('suspend', onSuspend)
-          video.removeEventListener('ended', onEnded)
-          video.removeEventListener('timeupdate', onTimeUpdate)
-        }
-        // 120秒后自动清除诊断监听
-        setTimeout(() => {
-          if (diagGenId === loadGenerationId) {
-            logger.info('[VideoPlayer] FFmpeg: diag listeners auto-cleared after 120s')
-          }
-          removeDiagListeners()
-        }, 120_000)
-        // ── 诊断结束 ──
-
-        const doPlay = () => {
-          video.play().then(() => {
-            logger.info('[VideoPlayer] FFmpeg: play() succeeded')
-          }).catch((e: Error) => {
-            logger.warn(`[VideoPlayer] FFmpeg: play() rejected (${e.name}: ${e.message}), retrying after 500ms...`)
-            setTimeout(() => {
-              if (genId === loadGenerationId && video.src === result.proxyUrl) {
-                video.play().then(() => {
-                  logger.info('[VideoPlayer] FFmpeg: play() succeeded on retry')
-                }).catch((e2: Error) => {
-                  logger.warn(`[VideoPlayer] FFmpeg: play() still rejected on retry: ${e2.name}: ${e2.message}`)
-                })
-              }
-            }, 500)
-          })
-        }
-        if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
-          doPlay()
-        } else {
-          video.addEventListener('canplay', doPlay, { once: true })
-          video.addEventListener('loadeddata', () => {
-            if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
-              video.removeEventListener('canplay', doPlay)
-              doPlay()
-            }
-          }, { once: true })
-        }
-        if (getIsMirroring()) restartMirrorStream(art)
-        return
-      }
-      logger.warn('[VideoPlayer] FFmpeg session failed, FFmpeg mode forbids native/software fallback:', result?.error)
-    } catch (e) {
-      logger.warn('[VideoPlayer] FFmpeg session create error, FFmpeg mode forbids native/software fallback:', e)
-    }
-    return
-  }
-
   // ── 格式检测与路由 ──
   let finalUrl = url
   const lowerPath = finalUrl.split('?')[0].split('#')[0].toLowerCase()
-  let finalFormat: string
+  let finalFormat = ''
 
   const hasCustomHeaders = !!(headers['Referer'] || headers['referer'] || headers['Origin'] || headers['origin'])
   const directFmt = isDirectFormat(lowerPath)
@@ -1863,7 +2077,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     if (!externalPlay) {
       try {
         await closeCurrentSession()
-        const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat)
+        const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat, await computePreferIpv6(finalUrl))
         if (genId !== loadGenerationId) return
         if (sess && sess.proxyUrl) {
           finalUrl = sess.proxyUrl
@@ -1882,10 +2096,24 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     finalFormat = 'mp4'
   } else {
     const isGateway = isRedirectGateway(url)
-    const gatewayGuessed = isGateway ? guessFormatFromGatewayPath(url) : null
-    if (gatewayGuessed) {
-      finalFormat = gatewayGuessed
-    } else {
+    // ── 新: 网关两步探测 ──
+    // 第一步: HEAD请求 + 重定向跟随 → 仅获取格式 (不消费body, 不消耗一次性token)
+    // 第二步: 从原始URL重新发起连接播放 (不重用第一步的重定向终点URL)
+    if (isGateway) {
+      const probeGatewayFn = window.electronAPI?.probeGatewayFormat
+        ? (u: string, h: Record<string, string>) => window.electronAPI!.probeGatewayFormat(u, h)
+        : undefined
+      if (probeGatewayFn) {
+        const probeResult = await probeGatewayFormat(finalUrl, headers, probeGatewayFn)
+        if (genId !== loadGenerationId) return
+        if (probeResult.format !== 'unknown') {
+          finalFormat = probeResult.format
+          logger.info(`[VideoPlayer] gateway probe: format=${finalFormat} for ${url.substring(0, 80)}`)
+        }
+      }
+    }
+    // 非网关 URL 或网关探测失败 → 回退 probeFinalFormat
+    if (!finalFormat) {
       const probeStreamFn = window.electronAPI?.probeStream
         ? (u: string, h: Record<string, string>) => window.electronAPI!.probeStream(u, h)
         : undefined
@@ -1917,7 +2145,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     if (!sessionManager.currentProxySessionId && !externalPlay && !hasFormatExt) {
       try {
         await closeCurrentSession()
-        const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat)
+        const sess = await sessionManager.createProxySession(finalUrl, headers, finalFormat, await computePreferIpv6(finalUrl))
         if (genId !== loadGenerationId) return
         if (sess && sess.proxyUrl) {
           finalUrl = sess.proxyUrl
@@ -1934,6 +2162,78 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
 
   if (genId !== loadGenerationId) return
 
+  // ── FFmpeg 模式: 复用上面格式检测+代理, 固定 FFmpeg 解码 ──
+  if (store.decodeMode === 'ffmpeg') {
+    if (!store.ffmpegPath) {
+      logger.warn('[VideoPlayer] FFmpeg mode: ffmpeg not available')
+      return
+    }
+    disposeAudioPlayer()
+    try {
+      logger.info(`[VideoPlayer] FFmpeg: creating session for ${finalUrl.substring(0, 120)}`)
+      const result = await sessionManager.createFfmpegSession(finalUrl, headers, store.ffmpegPath)
+      if (genId !== loadGenerationId) return
+      if (result && result.success && result.proxyUrl && art) {
+        currentFormat = 'mp4'
+        const video = art.video as HTMLVideoElement
+        logger.info(`[VideoPlayer] FFmpeg: session created, proxyUrl=${result.proxyUrl}`)
+        video.src = result.proxyUrl
+        video.play().catch(() => {})
+        hasEverPlayed = true
+        if (getIsMirroring()) restartMirrorStream(art)
+        return
+      }
+      logger.warn('[VideoPlayer] FFmpeg session failed:', result?.error)
+    } catch (e) {
+      logger.warn('[VideoPlayer] FFmpeg session create error:', e)
+    }
+    return
+  }
+
+  // ── MPV 模式: 通过 webview 内嵌 MPV 直接播放 ──
+  if (store.decodeMode === 'mpv') {
+    logger.info(`[VideoPlayer] doLoad: MPV mode, mpvPath=${store.mpvPath || '(EMPTY!)'}, url=${finalUrl.substring(0, 120)}`)
+    if (!store.mpvPath) {
+      logger.warn('[VideoPlayer] doLoad: MPV mode selected but mpvPath is EMPTY! Configure MPV path in Settings.')
+      return
+    }
+    const vid = art!.video as HTMLVideoElement
+    vid.pause()
+    vid.removeAttribute('src')
+    vid.load()
+    disposeHlsFlvAudio(vid)
+    disposeAudioPlayer()
+
+    try {
+      await startMpv(finalUrl, headers, store.mpvPath, genId, loadGenerationId)
+    } catch (e) {
+      logger.warn(`[VideoPlayer] doLoad: MPV EXCEPTION: ${e}`)
+    }
+    return
+  }
+
+  // ── VLC 模式: 弹窗播放 ──
+  if (store.decodeMode === 'vlc') {
+    logger.info(`[VideoPlayer] doLoad: VLC mode, vlcPath=${store.vlcPath || '(EMPTY!)'}, url=${finalUrl.substring(0, 120)}`)
+    if (!store.vlcPath) {
+      logger.warn('[VideoPlayer] doLoad: VLC mode selected but vlcPath is EMPTY! Configure VLC path in Settings.')
+      return
+    }
+    const vid = art!.video as HTMLVideoElement
+    vid.pause()
+    vid.removeAttribute('src')
+    vid.load()
+    disposeHlsFlvAudio(vid)
+    disposeAudioPlayer()
+
+    try {
+      await startVlc(finalUrl, headers, store.vlcPath, genId, loadGenerationId)
+    } catch (e) {
+      logger.warn(`[VideoPlayer] doLoad: VLC EXCEPTION: ${e}`)
+    }
+    return
+  }
+
   const onlineExt = lowerPath.split('.').pop() || ''
   const isOnlineAudio = AUDIO_EXTS.has(onlineExt)
 
@@ -1941,9 +2241,7 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
 
   if (store.decodeMode === 'hardware') {
     const video = art!.video as HTMLVideoElement
-    disposeHls(video)
-    disposeFlv(video)
-    disposeAudioPlayer()
+    disposeHlsFlvAudio(video)
     currentFormat = finalFormat
 
     if (genId !== loadGenerationId) return
@@ -1968,22 +2266,19 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
   if (store.decodeMode === 'software') {
     currentFormat = finalFormat
     const video = art!.video as HTMLVideoElement
-    disposeHls(video)
-    disposeFlv(video)
-    disposeAudioPlayer()
+    disposeHlsFlvAudio(video)
     if (genId !== loadGenerationId) return
     if (isUnknownFormat) {
-      logger.warn(`[VideoPlayer] software: .${finalFormat} 格式无法识别, software 模式禁止 native/FFmpeg 回退`)
+      logger.info(`[VideoPlayer] software: .${finalFormat} 格式未知, 尝试 M3U8 软解`)
+      finalFormat = 'm3u8'
+      currentFormat = 'm3u8'
+      playViaSwitchUrl('m3u8', finalUrl)
     } else if (finalFormat === 'm3u8' || finalFormat === 'ts') {
       logger.info(`[VideoPlayer] software: .${finalFormat} → 软解 (hls.js/mpegts.js)`)
-      art!.type = finalFormat
-      startSourceTimeout()
-      art!.switchUrl(finalUrl)
+      playViaSwitchUrl(finalFormat, finalUrl)
     } else if (finalFormat === 'flv') {
       logger.info(`[VideoPlayer] software: .${finalFormat} → 软解 (mpegts.js)`)
-      art!.type = finalFormat
-      startSourceTimeout()
-      art!.switchUrl(finalUrl)
+      playViaSwitchUrl(finalFormat, finalUrl)
     } else if (isOnlineAudio) {
       logger.info(`[VideoPlayer] software: .${onlineExt} → 软解 (AudioPlayer)`)
       disposeAudioPlayer()
@@ -2016,35 +2311,38 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     return
   }
 
-  // ── auto 模式: 根据格式选择对应解码方式，播放失败回退 FFmpeg ──
-  // FLV 格式 → 直接走 FFmpeg
-  if (finalFormat === 'flv') {
-    logger.info('[VideoPlayer] auto: FLV → FFmpeg')
-    currentFormat = 'flv'
-    if (store.ffmpegPath) {
-      await closeCurrentSession()
-      try {
-        const result = await sessionManager.createFfmpegSession(url, headers, store.ffmpegPath, undefined, 'flv')
-        if (genId !== loadGenerationId) return
-        if (result && result.success && result.proxyUrl && art) {
-          const video = art.video as HTMLVideoElement
-          currentFormat = 'mp4'
-          video.src = result.proxyUrl
-          video.play().catch(() => {})
-          if (getIsMirroring()) restartMirrorStream(art)
-          return
-        }
-        logger.warn('[VideoPlayer] auto: FLV FFmpeg 失败:', result?.error)
-      } catch (e) {
-        logger.warn('[VideoPlayer] auto: FLV FFmpeg 出错:', e)
-      }
-    } else {
-      logger.warn('[VideoPlayer] auto: FLV → FFmpeg 但 ffmpegPath 未设置')
-    }
+  // ── auto 模式: 硬解/软解 (按格式) → 错误触发回退 → 安全超时兜底 MPV→VLC→FFmpeg ──
+
+  _autoFallbackUrl = finalUrl
+  _autoFallbackHeaders = { ...headers }
+  _autoFallbackGenId = loadGenerationId
+  startAutoSafetyTimer()
+
+  // Step 1: mp4/webm 等原生视频格式 → 硬解
+  if (finalFormat === 'mp4' || isNativeExt(lowerPath)) {
+    logger.info(`[VideoPlayer] auto: .${finalFormat} → 硬解 (native)`)
+    currentFormat = finalFormat
+    const video = art!.video as HTMLVideoElement
+    disposeHlsFlvAudio(video)
+    if (genId !== loadGenerationId) return
+    video.src = finalUrl
+    video.play().catch(() => {})
+    if (getIsMirroring()) restartMirrorStream(art)
     return
   }
 
-  // 音频格式 → 软解 (AudioPlayer), 失败回退 FFmpeg
+  // Step 2: FLV → 软解 (mpegts.js)
+  if (finalFormat === 'flv') {
+    logger.info('[VideoPlayer] auto: FLV → 软解 (mpegts.js)')
+    currentFormat = 'flv'
+    const video = art!.video as HTMLVideoElement
+    disposeHlsFlvAudio(video)
+    if (genId !== loadGenerationId) return
+    playViaSwitchUrl('flv', finalUrl)
+    return
+  }
+
+  // Step 3: 音频格式 → 软解 (AudioPlayer)
   if (isOnlineAudio) {
     logger.info(`[VideoPlayer] auto: .${onlineExt} → 软解 (AudioPlayer)`)
     currentFormat = finalFormat
@@ -2052,30 +2350,19 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
     if (genId !== loadGenerationId) return
     const player = new SoftwareAudioPlayer()
     audioPlayer = player
-    const autoAudioGenId = loadGenerationId
     player.on('ready', () => {
       currentFormat = 'mp4'
       loadGenerationId++
       confirmedFormat = 'mp4'
+      clearAutoSafetyTimer()
       logger.info('[VideoPlayer] AudioPlayer ready (auto mode)')
     })
     player.on('ended', () => emit('ended'))
     player.on('error', () => {
-      if (autoAudioGenId !== loadGenerationId) return
-      logger.info('[VideoPlayer] auto: AudioPlayer 播放失败, 回退 FFmpeg')
+      if (_autoFallbackGenId !== loadGenerationId) return
+      logger.info('[VideoPlayer] auto: AudioPlayer 播放失败, 触发回退链')
       disposeAudioPlayer()
-      if (store.ffmpegPath) {
-        sessionManager.createFfmpegSession(finalUrl, headers, store.ffmpegPath).then(result => {
-          if (autoAudioGenId !== loadGenerationId) return
-          if (result && result.success && result.proxyUrl && art) {
-            currentFormat = 'mp4'
-            const vid = art.video as HTMLVideoElement
-            vid.src = result.proxyUrl
-            vid.play().catch(() => {})
-            if (getIsMirroring()) restartMirrorStream(art)
-          }
-        }).catch(() => {})
-      }
+      triggerAutoFallback().catch(() => {})
     })
     player.on('play', () => { hasEverPlayed = true; emit('playing') })
     player.load(finalUrl).then(() => {
@@ -2083,105 +2370,34 @@ async function doLoad(url: string, headers: Record<string, string>): Promise<voi
       player.setMuted(art!.muted)
       player.play()
     }).catch((err: Error) => {
-      if (autoAudioGenId !== loadGenerationId) return
-      logger.info('[VideoPlayer] auto: AudioPlayer 加载失败, 回退 FFmpeg:', err.message)
+      if (_autoFallbackGenId !== loadGenerationId) return
+      logger.info('[VideoPlayer] auto: AudioPlayer 加载失败, 触发回退链:', err.message)
       disposeAudioPlayer()
-      if (store.ffmpegPath) {
-        sessionManager.createFfmpegSession(finalUrl, headers, store.ffmpegPath).then(result => {
-          if (autoAudioGenId !== loadGenerationId) return
-          if (result && result.success && result.proxyUrl && art) {
-            currentFormat = 'mp4'
-            const vid = art.video as HTMLVideoElement
-            vid.src = result.proxyUrl
-            vid.play().catch(() => {})
-            if (getIsMirroring()) restartMirrorStream(art)
-          }
-        }).catch(() => {})
-      }
+      triggerAutoFallback().catch(() => {})
     })
     if (getIsMirroring()) restartMirrorStream(art)
     return
   }
 
-  // mp4/webm 等原生视频格式 → 硬解，播放失败回退 FFmpeg
-  if (finalFormat === 'mp4' || isNativeExt(lowerPath)) {
-    logger.info(`[VideoPlayer] auto: .${finalFormat} → 硬解 (native)`)
-    currentFormat = finalFormat
-    const video = art!.video as HTMLVideoElement
-    disposeHls(video)
-    disposeFlv(video)
-    disposeAudioPlayer()
-    if (genId !== loadGenerationId) return
-    video.src = finalUrl
-
-    const autoNativeGenId = loadGenerationId
-    const autoNativeTimeout = setTimeout(() => {
-      if (autoNativeGenId !== loadGenerationId) return
-      if (hasEverPlayed) return
-      const v = art?.video as HTMLVideoElement | undefined
-      if (v && v.paused && v.readyState < 2) {
-        logger.info(`[VideoPlayer] auto: 硬解播放失败 .${finalFormat}, 回退 FFmpeg`)
-        if (store.ffmpegPath) {
-          sessionManager.createFfmpegSession(finalUrl, headers, store.ffmpegPath).then(result => {
-            if (autoNativeGenId !== loadGenerationId) return
-            if (result && result.success && result.proxyUrl && art) {
-              currentFormat = 'mp4'
-              const vid = art.video as HTMLVideoElement
-              vid.src = result.proxyUrl
-              vid.play().catch(() => {})
-              if (getIsMirroring()) restartMirrorStream(art)
-            }
-          }).catch(() => {})
-        }
-      }
-    }, 4000)
-
-    video.play().catch(() => {})
-    if (getIsMirroring()) restartMirrorStream(art)
-    const clearAutoNativeTimeout = () => { clearTimeout(autoNativeTimeout) }
-    video.addEventListener('playing', clearAutoNativeTimeout, { once: true })
-    return
-  }
-
-  // m3u8/ts → 软解，播放失败回退 FFmpeg (由 customType 内部处理)
+  // Step 4: m3u8/ts → 软解 (hls.js/mpegts.js)
   if (finalFormat === 'm3u8' || finalFormat === 'ts') {
     logger.info(`[VideoPlayer] auto: .${finalFormat} → 软解 (hls.js/mpegts.js)`)
     currentFormat = finalFormat
     const video = art!.video as HTMLVideoElement
-    disposeHls(video)
-    disposeFlv(video)
-    disposeAudioPlayer()
+    disposeHlsFlvAudio(video)
     if (genId !== loadGenerationId) return
-    art!.type = finalFormat
-    startSourceTimeout()
-    art!.switchUrl(finalUrl)
-    if (getIsMirroring()) restartMirrorStream(art)
+    playViaSwitchUrl(finalFormat, finalUrl)
     return
   }
 
-  // 无法识别的格式 → FFmpeg
-  logger.info(`[VideoPlayer] auto: .${finalFormat} → FFmpeg (格式无法识别)`)
-  currentFormat = finalFormat
-  if (store.ffmpegPath) {
-    await closeCurrentSession()
-    try {
-      const result = await sessionManager.createFfmpegSession(url, headers, store.ffmpegPath)
-      if (genId !== loadGenerationId) return
-      if (result && result.success && result.proxyUrl && art) {
-        const video = art.video as HTMLVideoElement
-        currentFormat = 'mp4'
-        video.src = result.proxyUrl
-        video.play().catch(() => {})
-        if (getIsMirroring()) restartMirrorStream(art)
-        return
-      }
-      logger.warn('[VideoPlayer] auto: FFmpeg fallback failed:', result?.error)
-    } catch (e) {
-      logger.warn('[VideoPlayer] auto: FFmpeg fallback error:', e)
-    }
-  } else {
-    logger.warn('[VideoPlayer] auto: FFmpeg not available, cannot play unknown format')
-  }
+  // Step 5: 无法识别 → 尝试 M3U8 软解
+  logger.info(`[VideoPlayer] auto: .${finalFormat} 格式未知, 尝试 M3U8 软解`)
+  finalFormat = 'm3u8'
+  currentFormat = 'm3u8'
+  const unknownVideo = art!.video as HTMLVideoElement
+  disposeHlsFlvAudio(unknownVideo)
+  if (genId !== loadGenerationId) return
+  playViaSwitchUrl('m3u8', finalUrl)
 }
 
 // ── 生命周期 ──
@@ -2196,7 +2412,7 @@ onMounted(async () => {
 onUnmounted(() => destroyPlayer())
 
 async function destroyPlayer(): Promise<void> {
-  clearLoadTimer()
+  closePopup()
   clearSourceTimeout()
   clearStallWatchdog()
   if (_errorRetryTimer) { clearTimeout(_errorRetryTimer); _errorRetryTimer = null }
@@ -2205,7 +2421,7 @@ async function destroyPlayer(): Promise<void> {
   hasEverPlayed = false
   lastPlayMode = null
   controlsAdded = false
-  if (_mpegtsWatchdog) { clearTimeout(_mpegtsWatchdog); _mpegtsWatchdog = null }
+  clearAutoSafetyTimer()
   await closeCurrentSession()
   destroyMirror()
   destroySubtitle()
@@ -2266,6 +2482,27 @@ watch(() => store.decodeMode, (newMode, oldMode) => {
   }
 })
 
+watch(() => store.mpvPath, () => {
+  updateDecodeButton()
+  if (store.decodeMode === 'mpv' && !store.mpvPath) {
+    store.setDecodeMode('auto')
+  }
+})
+
+watch(() => store.vlcPath, () => {
+  updateDecodeButton()
+  if (store.decodeMode === 'vlc' && !store.vlcPath) {
+    store.setDecodeMode('auto')
+  }
+})
+
+watch(() => store.ffmpegPath, () => {
+  updateDecodeButton()
+  if (store.decodeMode === 'ffmpeg' && !store.ffmpegPath) {
+    store.setDecodeMode('auto')
+  }
+})
+
 // 字幕同步到 ArtPlayer
 watch(subtitleVttUrl, (url) => {
   if (url && art) {
@@ -2303,7 +2540,7 @@ defineExpose({
 
 <style scoped>
 .video-player-container { width: 100%; height: 100%; position: relative; background: #000; }
-.video-inner { width: 100%; height: 100%; }
+.video-inner { width: 100%; height: 100%; background: #000; }
 .video-inner :deep(.artplayer-app) { width: 100% !important; height: 100% !important; }
 .video-inner :deep(.artplayer-controls) {
   width: 100% !important;
@@ -2348,6 +2585,8 @@ defineExpose({
 .video-inner :deep(.pclive-decode-btn.decode-hw) { color: #4fc3f7; background: rgba(79,195,247,0.2); }
 .video-inner :deep(.pclive-decode-btn.decode-sw) { color: #ff9800; background: rgba(255,152,0,0.2); }
 .video-inner :deep(.pclive-decode-btn.decode-ff) { color: #66bb6a; background: rgba(102,187,106,0.2); }
+.video-inner :deep(.pclive-decode-btn.decode-mpv) { color: #f48fb1; background: rgba(244,143,177,0.2); }
+.video-inner :deep(.pclive-decode-btn.decode-vlc) { color: #ff8a65; background: rgba(255,138,101,0.2); }
 .video-inner :deep(.pclive-decode-btn.decode-auto) { color: #b0b0b0; background: rgba(180,180,180,0.15); }
 .video-inner :deep(.pclive-decode-btn:hover) { background: rgba(255,255,255,0.15); border-radius: 3px; }
 .video-inner :deep(.pclive-playmode-btn) {
@@ -2355,4 +2594,50 @@ defineExpose({
   padding: 2px 8px; border-radius: 3px; font-size: 11px; cursor: pointer; transition: all 0.2s;
 }
 .video-inner :deep(.pclive-playmode-btn:hover) { background: rgba(167,139,250,0.35); color: #c4b5fd; }
+</style>
+
+<style>
+.pclive-popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: transparent;
+}
+.pclive-popup-menu {
+  background: #1e1e2e;
+  border: 1px solid #3a3a4a;
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 100px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55);
+}
+.pclive-popup-item {
+  padding: 7px 16px;
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.pclive-popup-item:hover {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.pclive-popup-item.active {
+  color: #fff;
+  font-weight: 700;
+  background: rgba(255,255,255,0.06);
+}
+.pclive-popup-item.decode-auto { color: #b0b0b0; }
+.pclive-popup-item.decode-hw { color: #4fc3f7; }
+.pclive-popup-item.decode-sw { color: #ff9800; }
+.pclive-popup-item.decode-mpv { color: #f48fb1; }
+.pclive-popup-item.decode-vlc { color: #ff8a65; }
+.pclive-popup-item.decode-ff { color: #66bb6a; }
+.pclive-popup-item:hover.decode-hw,
+.pclive-popup-item:hover.decode-sw,
+.pclive-popup-item:hover.decode-mpv,
+.pclive-popup-item:hover.decode-vlc,
+.pclive-popup-item:hover.decode-ff,
+.pclive-popup-item:hover.decode-auto { color: #fff; }
 </style>

@@ -28,12 +28,38 @@ function extAttr(line: string, name: string): string {
 export function parseM3u(content: string): LiveChannelGroup[] {
   const groups: LiveChannelGroup[] = []
   let currentGroup: LiveChannelGroup | null = null
+  let pendingUa = ''
+  let pendingReferer = ''
+  let pendingOrigin = ''
+  let pendingHeader: Record<string, string> = {}
+
   const normalized = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const lines = normalized.split('\n')
 
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed === '#EXTM3U' || trimmed.startsWith('#PLAYLIST')) continue
+
+    if (trimmed.startsWith('#EXTVLCOPT:')) {
+      const refMatch = trimmed.match(/http-referrer[:=]\s*(.+)$/i)
+      const uaMatch = trimmed.match(/http-user-agent[:=]\s*(.+)$/i)
+      const originMatch = trimmed.match(/http-origin[:=]\s*(.+)$/i)
+      if (refMatch) pendingReferer = refMatch[1].trim()
+      if (uaMatch) pendingUa = uaMatch[1].trim()
+      if (originMatch) pendingOrigin = originMatch[1].trim()
+      continue
+    }
+
+    if (trimmed.startsWith('#EXTHTTP:')) {
+      try {
+        const json = trimmed.substring(trimmed.indexOf(':') + 1).trim()
+        const parsed = JSON.parse(json)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          pendingHeader = { ...pendingHeader, ...parsed }
+        }
+      } catch (_) { /* ignore malformed JSON */ }
+      continue
+    }
 
     if (trimmed.startsWith('#EXTINF')) {
       const tvgId = extAttr(trimmed, 'tvg-id')
@@ -57,14 +83,14 @@ export function parseM3u(content: string): LiveChannelGroup[] {
         channelName: channelName || tvgName || tvgId,
         channelNum: 0,
         channelLogo: tvgLogo || '',
-        channelUa: '',
+        channelUa: pendingUa,
         channelClick: '',
         channelFormat: '',
-        channelOrigin: '',
-        channelReferer: '',
+        channelOrigin: pendingOrigin,
+        channelReferer: pendingReferer,
         channelTvgId: tvgId || '',
         channelTvgName: tvgName || '',
-        channelHeader: {},
+        channelHeader: { ...pendingHeader },
         channelParse: 0,
         channelUrls: [],
         channelSourceNames: [],
@@ -72,6 +98,10 @@ export function parseM3u(content: string): LiveChannelGroup[] {
         sourceNum: 0,
         includeBack: false
       })
+      pendingUa = ''
+      pendingReferer = ''
+      pendingOrigin = ''
+      pendingHeader = {}
       continue
     }
 
@@ -79,6 +109,7 @@ export function parseM3u(content: string): LiveChannelGroup[] {
       const last = currentGroup.liveChannels[currentGroup.liveChannels.length - 1]
       if (!trimmed.startsWith('#') && (trimmed.startsWith('http') || trimmed.startsWith('rtmp'))) {
         last.channelUrls.push(trimmed)
+        last.sourceNum = last.channelUrls.length
       }
     }
   }
@@ -109,6 +140,14 @@ function generateM3u(groups: LiveChannelGroup[], sourceName?: string): string {
       attrs.push(`group-title="${group.groupName}"`)
 
       lines.push(`#EXTINF:-1 ${attrs.join(' ')} ,${ch.channelName}`)
+
+      if (ch.channelReferer) lines.push(`#EXTVLCOPT:http-referrer=${ch.channelReferer}`)
+      if (ch.channelUa) lines.push(`#EXTVLCOPT:http-user-agent=${ch.channelUa}`)
+      if (ch.channelOrigin) lines.push(`#EXTVLCOPT:http-origin=${ch.channelOrigin}`)
+      if (ch.channelHeader && Object.keys(ch.channelHeader).length > 0) {
+        lines.push(`#EXTHTTP:${JSON.stringify(ch.channelHeader)}`)
+      }
+
       lines.push(urls[0])
       lines.push('')
     }

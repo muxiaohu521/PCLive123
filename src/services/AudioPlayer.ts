@@ -4,6 +4,8 @@
 // 支持格式：MP3 / AAC / FLAC / WAV / Opus / OGG / WMA 等浏览器原生支持的所有音频编码
 // 不支持：需要完整文件，不适用无限流媒体（直播音频流请用 FFmpeg 模式）
 
+import { logger } from '@/utils/logger'
+
 export interface AudioPlayerEvents {
   ready: () => void
   play: () => void
@@ -68,6 +70,7 @@ export class SoftwareAudioPlayer {
 
   async load(url: string): Promise<void> {
     this.destroy()
+    logger.log('[AudioPlayer] loading:', url.substring(0, 80))
 
     try {
       this.emit('waiting')
@@ -85,10 +88,12 @@ export class SoftwareAudioPlayer {
       this._loaded = true
       this._currentTime = 0
       this.pauseOffset = 0
+      logger.log('[AudioPlayer] loaded, duration:', this._duration.toFixed(1) + 's')
 
       this.emit('ready')
       this.emit('canplay')
     } catch (e) {
+      logger.error('[AudioPlayer] load failed:', (e as Error)?.message || e)
       this.emit('error', e instanceof Error ? e : new Error(String(e)))
       throw e
     }
@@ -107,17 +112,13 @@ export class SoftwareAudioPlayer {
     this.source.start(0, this.pauseOffset)
 
     this.source.onended = () => {
-      // onended 触发条件：播放自然结束或 stop()
-      // 自然结束 → 发 ended；stop() → 不发 ended（pause/seek 场景）
-      if (this.source) {
-        // 检查是否是自然结束（到达末尾）
-        const natural = this.pauseOffset < this._duration - 0.05
-        this._playing = false
-        this._paused = false
-        this.stopTicker()
-        if (!natural) {
-          this.emit('ended')
-        }
+      if (!this._playing) return
+      const natural = this._currentTime >= this._duration - 0.1
+      this._playing = false
+      this._paused = false
+      this.stopTicker()
+      if (natural) {
+        this.emit('ended')
       }
     }
 
@@ -196,15 +197,9 @@ export class SoftwareAudioPlayer {
     this.ticker = setInterval(() => {
       if (this._playing && this.ctx) {
         this._currentTime = this.ctx.currentTime - this.startTime
-        // 到达末尾
         if (this.buffer && this._currentTime >= this.buffer.duration) {
           this._currentTime = this.buffer.duration
-          this._playing = false
-          this._paused = false
           this.stopTicker()
-          this.emit('timeupdate', this._currentTime, this._duration)
-          this.emit('ended')
-          return
         }
         this.emit('timeupdate', this._currentTime, this._duration)
       }

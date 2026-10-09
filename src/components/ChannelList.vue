@@ -28,6 +28,7 @@
           class="subline-tab"
           :class="{ active: activeSubLine === si, current: subLineHasCurrent(sl) }"
           @click="selectSubLine(si)"
+          @contextmenu.prevent="onSubLineContextMenu($event, sl)"
         >
           <span class="sl-name">{{ sl.name }}</span>
           <span class="sl-count">{{ sl.totalChannels }}</span>
@@ -41,6 +42,7 @@
           class="group-tab"
           :class="{ active: activeCategory === gi, current: categoryHasCurrent(cg) }"
           @click="selectCategory(gi)"
+          @contextmenu.prevent="onCategoryContextMenu($event, cg)"
         >
           <span class="tab-name">{{ cg.groupName }}</span>
           <span class="tab-count">{{ cg.liveChannels.length }}</span>
@@ -134,11 +136,44 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Tab 右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="tabContextMenu.visible"
+        class="context-menu-overlay"
+        @click="closeTabContextMenu"
+        @contextmenu.prevent="closeTabContextMenu"
+      >
+        <div
+          class="context-menu tab-context-menu"
+          :style="{ left: tabContextMenu.x + 'px', top: tabContextMenu.y + 'px' }"
+          tabindex="-1"
+          @click.stop
+        >
+          <div class="ctx-menu-header">
+            <span class="ctx-menu-title">
+              {{ tabContextMenu.type === 'subline' ? tabContextMenu.subLine?.name || '默认' : tabContextMenu.group?.groupName }}
+            </span>
+          </div>
+          <div class="ctx-menu-divider"></div>
+          <div class="ctx-menu-item" @click="copyTabName">
+            <span>复制名称</span>
+          </div>
+          <div class="ctx-menu-item" @click="copyTabUrls">
+            <span>复制URL</span>
+          </div>
+          <div class="ctx-menu-item ctx-menu-item-primary" @click="copyTabNameAndUrls">
+            <span>复制名称+URL</span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, reactive } from 'vue'
+import { ref, computed, watch, nextTick, reactive, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/store'
 import type { LiveChannelItem, LiveChannelGroup } from '@/models/LiveChannelItem'
 import { getChannelUrl } from '@/models/LiveChannelItem'
@@ -162,6 +197,15 @@ const contextMenu = reactive({
   x: 0,
   y: 0,
   channel: null as LiveChannelItem | null
+})
+
+const tabContextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  type: 'subline' as 'subline' | 'category',
+  subLine: null as SubLineGroup | null,
+  group: null as LiveChannelGroup | null,
 })
 
 function onContextMenu(e: MouseEvent, channel: LiveChannelItem) {
@@ -188,6 +232,98 @@ function onContextMenu(e: MouseEvent, channel: LiveChannelItem) {
 function closeContextMenu() {
   contextMenu.visible = false
 }
+
+function closeTabContextMenu() {
+  tabContextMenu.visible = false
+  tabContextMenu.subLine = null
+  tabContextMenu.group = null
+}
+
+function onSubLineContextMenu(e: MouseEvent, sl: SubLineGroup) {
+  if (e.button !== 2) return
+  tabContextMenu.type = 'subline'
+  tabContextMenu.subLine = sl
+  tabContextMenu.group = null
+  const menuWidth = 220
+  const menuHeight = 130
+  let x = e.clientX
+  let y = e.clientY
+  if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8
+  if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8
+  tabContextMenu.x = x
+  tabContextMenu.y = y
+  tabContextMenu.visible = true
+}
+
+function onCategoryContextMenu(e: MouseEvent, cg: LiveChannelGroup) {
+  if (e.button !== 2) return
+  tabContextMenu.type = 'category'
+  tabContextMenu.subLine = null
+  tabContextMenu.group = cg
+  const menuWidth = 220
+  const menuHeight = 130
+  let x = e.clientX
+  let y = e.clientY
+  if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8
+  if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8
+  tabContextMenu.x = x
+  tabContextMenu.y = y
+  tabContextMenu.visible = true
+}
+
+function collectTabUrls(): string[] {
+  const channels: LiveChannelItem[] = []
+  if (tabContextMenu.type === 'subline' && tabContextMenu.subLine) {
+    for (const g of tabContextMenu.subLine.groups) {
+      channels.push(...g.liveChannels)
+    }
+  } else if (tabContextMenu.type === 'category' && tabContextMenu.group) {
+    channels.push(...tabContextMenu.group.liveChannels)
+  }
+  return channels.map(ch => getChannelUrl(ch)).filter(Boolean)
+}
+
+function copyTabName() {
+  let name = ''
+  if (tabContextMenu.type === 'subline' && tabContextMenu.subLine) {
+    name = tabContextMenu.subLine.name || '默认'
+  } else if (tabContextMenu.type === 'category' && tabContextMenu.group) {
+    name = tabContextMenu.group.groupName
+  }
+  if (name) copyText(name)
+  closeTabContextMenu()
+}
+
+function copyTabUrls() {
+  const urls = collectTabUrls()
+  if (urls.length) copyText(urls.join('\n'))
+  else copyText('')
+  closeTabContextMenu()
+}
+
+function copyTabNameAndUrls() {
+  let name = ''
+  if (tabContextMenu.type === 'subline' && tabContextMenu.subLine) {
+    name = tabContextMenu.subLine.name || '默认'
+  } else if (tabContextMenu.type === 'category' && tabContextMenu.group) {
+    name = tabContextMenu.group.groupName
+  }
+  const urls = collectTabUrls()
+  copyText(name + '\n' + urls.join('\n'))
+  closeTabContextMenu()
+}
+
+function onGlobalClick() {
+  if (tabContextMenu.visible) tabContextMenu.visible = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onGlobalClick)
+})
 
 function onContextMenuKeydown(e: KeyboardEvent) {
   const el = contextMenuRef.value

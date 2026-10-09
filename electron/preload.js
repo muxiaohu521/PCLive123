@@ -24,7 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchUrlSpider: (url, headers) => ipcRenderer.invoke('fetch-url-spider', url, headers || {}),
 
   probeStream: (url, headers) => ipcRenderer.invoke('probe-stream', url, headers || {}),
-  createStreamSession: (url, headers, detectedFormat) => ipcRenderer.invoke('create-stream-session', url, headers || {}, detectedFormat || null),
+  probeGatewayFormat: (url, headers) => ipcRenderer.invoke('probe-gateway-format', url, headers || {}),
+  createStreamSession: (url, headers, detectedFormat, preferIpv6) => ipcRenderer.invoke('create-stream-session', url, headers || {}, detectedFormat || null, preferIpv6 || false),
   closeStreamSession: (sessionId) => ipcRenderer.invoke('close-stream-session', sessionId),
   registerVideoHeaders: (domainKey, domainName, headers) => ipcRenderer.invoke('register-video-headers', domainKey, domainName, headers || {}),
   unregisterVideoHeaders: (domainKey) => ipcRenderer.invoke('unregister-video-headers', domainKey),
@@ -101,6 +102,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ffmpeg:stderr', handler)
     return () => ipcRenderer.removeListener('ffmpeg:stderr', handler)
   },
+  mpvSelectPath: () => ipcRenderer.invoke('mpv:selectPath'),
+  mpvTest: (mpvPath) => ipcRenderer.invoke('mpv:test', mpvPath),
+  mpvCreateSession: (sourceUrl, headers, mpvPath, seekTime) => ipcRenderer.invoke('mpv:createSession', sourceUrl, headers || {}, mpvPath, seekTime),
+  mpvCloseSession: (sessionId) => ipcRenderer.invoke('mpv:closeSession', sessionId),
+  onMpvPlaybackEnded: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('mpv:playbackEnded', handler)
+    return () => ipcRenderer.removeListener('mpv:playbackEnded', handler)
+  },
+  vlcSelectPath: () => ipcRenderer.invoke('vlc:selectPath'),
+  vlcTest: (vlcPath) => ipcRenderer.invoke('vlc:test', vlcPath),
+  vlcCreateSession: (sourceUrl, headers, vlcPath, seekTime) => ipcRenderer.invoke('vlc:createSession', sourceUrl, headers || {}, vlcPath, seekTime),
+  vlcCloseSession: (sessionId) => ipcRenderer.invoke('vlc:closeSession', sessionId),
+  onVlcPlaybackEnded: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('vlc:playbackEnded', handler)
+    return () => ipcRenderer.removeListener('vlc:playbackEnded', handler)
+  },
   onMainDebugLog: (callback) => {
     const handler = (_event, line) => callback(line)
     ipcRenderer.on('main:debugLog', handler)
@@ -126,4 +145,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recordingStatus: () => ipcRenderer.invoke('recording:status'),
 
   rendererLog: (msg) => ipcRenderer.send('renderer:log', msg),
+  hasIpv6: () => ipcRenderer.invoke('network:hasIpv6'),
 })

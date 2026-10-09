@@ -63,9 +63,7 @@
   </div>
 </template><script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-
-const log = (...args: any[]) => console.log('[FloatView]', ...args)
-const warn = (...args: any[]) => console.warn('[FloatView]', ...args)
+import { logger } from '@/utils/logger'
 
 const videoEl = ref<HTMLVideoElement | null>(null)
 const playing = ref(false)
@@ -122,14 +120,14 @@ let mirrorPC: RTCPeerConnection | null = null
 let cleanupSignal: (() => void) | null = null
 let iceCandidatesBuffer: RTCIceCandidateInit[] = []
 
-function onPlaying() { log('onPlaying'); connecting.value = false; playing.value = true; error.value = ''; scheduleHide() }
-function onWaiting() { log('onWaiting'); connecting.value = true; playing.value = false; showOverlay() }
-function onPause() { log('onPause'); playing.value = false; showOverlay() }
-function onVideoError() { warn('onVideoError'); connecting.value = false; error.value = '视频流中断' }
+function onPlaying() { logger.log('[FloatView] onPlaying'); connecting.value = false; playing.value = true; error.value = ''; scheduleHide() }
+function onWaiting() { logger.log('[FloatView] onWaiting'); connecting.value = true; playing.value = false; showOverlay() }
+function onPause() { logger.log('[FloatView] onPause'); playing.value = false; showOverlay() }
+function onVideoError() { logger.warn('[FloatView] onVideoError'); connecting.value = false; error.value = '视频流中断' }
 
 async function startReceiving() {
   const api = window.electronAPI
-  if (!api) { warn('electronAPI not available'); return }
+  if (!api) { logger.warn('[FloatView] electronAPI not available'); return }
   mirrorPC = createPeerConnection()
 
   function createPeerConnection(): RTCPeerConnection {

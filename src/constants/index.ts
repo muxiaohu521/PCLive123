@@ -6,6 +6,8 @@ export const STORAGE_KEYS = {
   SOURCE_STATS: 'pclive_source_stats',
   DECODE_MODE: 'pclive_decode_mode',
   FFMPEG_PATH: 'pclive_ffmpeg_path',
+  MPV_PATH: 'pclive_mpv_path',
+  VLC_PATH: 'pclive_vlc_path',
   LOCAL_VIDEOS: 'pclive_local_videos',
   LOCAL_VIDEO_BRANCHES: 'pclive_local_video_branches',
   LOCAL_VIDEO_ACTIVE_BRANCH: 'pclive_local_video_active_branch',
@@ -71,6 +73,8 @@ export const DECODE_MODES = {
   AUTO: 'auto',
   HARDWARE: 'hardware',
   SOFTWARE: 'software',
+  MPV: 'mpv',
+  VLC: 'vlc',
   FFMPEG: 'ffmpeg',
 } as const
 
@@ -80,6 +84,8 @@ export const DECODE_MODE_LABELS: Record<DecodeMode, string> = {
   auto: '自动',
   hardware: '硬解',
   software: '软解',
+  mpv: 'MPV',
+  vlc: 'VLC',
   ffmpeg: 'FFmpeg',
 }
 
@@ -90,5 +96,5 @@ export interface SourceItem {
 
 export const APP_CONFIG = {
   MAX_REDIRECTS: 8,
-  FETCH_TIMEOUT: 5000,
+  FETCH_TIMEOUT: 30000,
 } as const

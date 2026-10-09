@@ -91,7 +91,8 @@ declare global {
       fetchUrlSpider: (url: string, headers?: Record<string, string>) => Promise<{ content: string; statusCode: number; headers: Record<string, string>; finalUrl: string }>
 
       probeStream: (url: string, headers?: Record<string, string>) => Promise<{ format: string; contentType: string; finalUrl: string; isPlaylist?: boolean; isFlv?: boolean }>
-      createStreamSession: (url: string, headers?: Record<string, string>, detectedFormat?: string) => Promise<{ sessionId: string; proxyUrl: string; proxyPort: number; detectedFormat?: string; resolvedUrl?: string }>
+      probeGatewayFormat: (url: string, headers?: Record<string, string>) => Promise<{ format: string; contentType: string; finalUrl: string; isPlaylist?: boolean; isFlv?: boolean }>
+      createStreamSession: (url: string, headers?: Record<string, string>, detectedFormat?: string, preferIpv6?: boolean) => Promise<{ sessionId: string; proxyUrl: string; proxyPort: number; detectedFormat?: string; resolvedUrl?: string }>
       closeStreamSession: (sessionId: string) => Promise<boolean>
       registerVideoHeaders: (domainKey: string, domainName: string, headers: Record<string, string>) => Promise<boolean>
       unregisterVideoHeaders: (domainKey: string) => Promise<boolean>
@@ -164,6 +165,18 @@ declare global {
       ffmpegCreateSession: (sourceUrl: string, headers: Record<string, string>, ffmpegPath: string, seekTime?: number, inputFormat?: string) => Promise<{ success: boolean; sessionId?: string; proxyUrl?: string; port?: number; detectedFormat?: string; duration?: number; error?: string }>
       ffmpegCloseSession: (sessionId: string) => Promise<boolean>
       onFfmpegStderr: (callback: (data: { sessionId: string; line: string }) => void) => () => void
+      mpvSelectPath: () => Promise<{ success: boolean; path: string }>
+      mpvTest: (mpvPath: string) => Promise<{ success: boolean; version: string; error?: string }>
+      mpvCreateSession: (sourceUrl: string, headers: Record<string, string>, mpvPath: string, seekTime?: number) => Promise<{ success: boolean; sessionId?: string; error?: string }>
+      mpvCloseSession: (sessionId: string) => Promise<boolean>
+      onMpvPlaybackEnded: (callback: (data: { sessionId: string; exitCode: number }) => void) => () => void
+
+      vlcSelectPath: () => Promise<{ success: boolean; path: string }>
+      vlcTest: (vlcPath: string) => Promise<{ success: boolean; version: string; error?: string }>
+      vlcCreateSession: (sourceUrl: string, headers: Record<string, string>, vlcPath: string, seekTime?: number) => Promise<{ success: boolean; sessionId?: string; error?: string }>
+      vlcCloseSession: (sessionId: string) => Promise<boolean>
+      onVlcPlaybackEnded: (callback: (data: { sessionId: string; exitCode: number }) => void) => () => void
+
       onMainDebugLog: (callback: (line: string) => void) => () => void
 
       serveLocalFile: (filePath: string) => Promise<{ success: boolean; token?: string; proxyUrl?: string; error?: string }>
@@ -188,6 +201,7 @@ declare global {
       recordingFinishStream: () => Promise<{ success: boolean; error?: string; elapsed?: string; totalBytes?: number; outputPath?: string }>
       recordingStatus: () => Promise<{ recording: boolean; elapsed?: number; totalBytes?: number; outputPath?: string }>
       rendererLog: (msg: string) => void
+      hasIpv6: () => Promise<boolean>
     }
   }
 

@@ -1,4 +1,4 @@
-# PCLive v1.2.0 - PC 直播客户端
+# PCLive v1.3.0 - PC 直播客户端
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-muxiaohu521%2FPCLive123-green.svg)](https://github.com/muxiaohu521/PCLive123)
@@ -148,6 +148,7 @@ PCLive/
 │   │   ├── DlnaPanel.vue         # DLNA 投屏面板
 │   │   ├── YspPanel.vue          # 央视频面板
 │   │   ├── YspPlayerBar.vue      # 央视频播放控制栏
+│   │   ├── SyncTVPanel.vue       # TVLive 同步投屏面板
 │   │   └── SettingsPanel.vue     # 设置面板（播放、字幕、网络、广告过滤）
 │   ├── composables/              # Vue Composables
 │   │   ├── useMirrorStream.ts    # WebRTC 镜像流（悬浮窗视频同步）
@@ -167,6 +168,7 @@ PCLive/
 │   │   └── index.ts              # 模型导出
 │   ├── utils/                    # 工具函数
 │   │   ├── TxtParser.ts          # M3U/TXT/JSON 多格式解析器
+│   │   ├── ThreadPool.ts         # 线程池 / 并发控制工具
 │   │   ├── SourceFileService.ts  # 源文件导入导出服务
 │   │   ├── SourceCrawler.ts      # 直播源爬虫
 │   │   ├── AdFilter.ts           # 广告过滤器
@@ -189,7 +191,6 @@ PCLive/
 ├── scripts/                      # 构建脚本
 │   ├── build_gui.py              # Python GUI 打包工具（Tkinter 弹窗，含 Node.js 下载）
 │   ├── build_portable.ps1        # 便携版一键构建脚本（自动收集依赖、裁剪、打包）
-│   └── .build_gui_cache.json     # GUI 打包工具缓存（Node.js 路径记忆）
 ├── dist/                         # Vite 构建产物
 ├── index.html                    # HTML 入口
 ├── vite.config.ts                # Vite 配置
@@ -290,10 +291,10 @@ PCLive-portable/PCLive/
 ├── snapshot_blob.bin / v8_context_snapshot.bin  # V8 快照
 ├── locales/                # 语言包（zh-CN, en-US 精简）
 ├── data/                   # 数据文件
-│   ├── sources.json        # 默认直播源配置（37个源）
-│   ├── verified_channels.json  # 本地直播源（69频道）
+│   ├── sources.json        # 默认直播源配置
+│   ├── verified_channels.json  # 本地直播源
 │   ├── ysp_channels.json   # 央视频频道配置
-│   └── cache/              # 原始直播源缓存（37个JSON）
+│   └── cache/              # 原始直播源缓存
 ├── BUILD_INFO.txt          # 构建信息
 └── resources/app/          # 应用程序代码（目录模式，非 asar）
     ├── dist/               # 前端构建产物

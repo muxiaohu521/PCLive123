@@ -376,6 +376,7 @@ import { ElMessage } from 'element-plus'
 import { crawlSourceUrls } from '@/utils/SourceCrawler'
 import { parseImportContent } from '@/utils/SourceFileService'
 import { getGeoInfo, extractHost, type GeoInfo } from '@/utils/GeoService'
+import { logger } from '@/utils/logger'
 
 const store = useAppStore()
 
@@ -441,11 +442,10 @@ watch(() => store.showToolsDialog, (v) => {
   nextTick(() => {
     setTimeout(() => {
       const root = document.querySelector('.tools-root') as HTMLElement | null
-      if (!root) { console.log('[TOOLS] .tools-root NOT FOUND'); return }
-      console.group('[TOOLS] DOM state')
-      console.log('  parent:', root.parentElement?.className || '(none)')
-      console.log('  grandparent:', root.parentElement?.parentElement?.className || '(none)')
-      // 不限定 class，dump 所有子孙元素的 tag + class
+      if (!root) { logger.warn('[TOOLS] .tools-root NOT FOUND'); return }
+      const parts: string[] = ['[TOOLS] DOM state']
+      parts.push('  parent: ' + (root.parentElement?.className || '(none)'))
+      parts.push('  grandparent: ' + (root.parentElement?.parentElement?.className || '(none)'))
       const all = root.querySelectorAll('*')
       const dump: string[] = []
       all.forEach(el => {
@@ -453,8 +453,8 @@ watch(() => store.showToolsDialog, (v) => {
         const cn = typeof el.className === 'string' ? el.className : ''
         dump.push('  ' + '  '.repeat(depth) + `<${el.tagName.toLowerCase()}${cn ? '.' + cn.replace(/\s+/g, '.') : ''}>`)
       })
-      console.log('  FULL DOM TREE (inside .tools-root):\n' + dump.join('\n'))
-      console.groupEnd()
+      parts.push('  FULL DOM TREE (inside .tools-root):\n' + dump.join('\n'))
+      logger.log(parts.join('\n'))
     }, 300)
   })
 })
@@ -999,7 +999,7 @@ function resetRecording() {
 }
 
 onMounted(() => {
-  console.log('[TOOLS] component mounted, .tools-root exists:', !!document.querySelector('.tools-root'))
+  logger.log('[TOOLS] component mounted, .tools-root exists:', !!document.querySelector('.tools-root'))
 })
 </script>
 

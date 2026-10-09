@@ -5,7 +5,7 @@
     <div class="main-content">
       <div class="player-area">
         <VideoPlayer
-          v-if="!store.yspWebviewUrl"
+          v-show="!store.yspWebviewUrl"
           ref="videoPlayerRef"
           :url="store.currentUrl"
           :headers="store.currentHeaders"
@@ -35,6 +35,7 @@
           @crashed="onYspCrashed"
           @console-message="onYspConsole"
         />
+
       </div>
 
       <div class="side-panels">
@@ -289,6 +290,13 @@ onMounted(async () => {
     store.loadLocalChannels()
     await store.loadYspChannels()
     registerGlobalListener()
+    // 注册 MPV 播放结束监听
+    if (window.electronAPI?.onMpvPlaybackEnded) {
+      window.electronAPI.onMpvPlaybackEnded(onMpvPlaybackEnded)
+    }
+    if (window.electronAPI?.onVlcPlaybackEnded) {
+      window.electronAPI.onVlcPlaybackEnded(onVlcPlaybackEnded)
+    }
     logger.info('[App] init done, setting up listeners')
   } catch (e: any) {
     logger.error('[App] onMounted init failed:', e?.message || e)
@@ -314,10 +322,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (currentTimeTimer) { clearInterval(currentTimeTimer); currentTimeTimer = null }
-  if (hideTimer) {
-    clearTimeout(hideTimer)
-    hideTimer = null
-  }
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
   unregisterGlobalListener()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('beforeunload', onBeforeUnload)
@@ -601,13 +606,13 @@ function onSourceError() {
 }
 
 function onVideoEnded() {
-  console.log('[App] ended fired, activePlayMode=', store.activePlayMode, 'localPlayMode=', store.localPlayMode)
+  logger.info('[App] ended fired, activePlayMode=', store.activePlayMode, 'localPlayMode=', store.localPlayMode)
   if (store.activePlayMode !== 'local') return
 
   const mode = store.localPlayMode
   const current = store.currentLocalVideo
   const list = store.localVideoList
-  console.log('[App] onVideoEnded mode=', mode, 'current=', current?.name, 'listLen=', list.length)
+  logger.info('[App] onVideoEnded mode=', mode, 'current=', current?.name, 'listLen=', list.length)
   if (!current || list.length === 0) return
 
   if (mode === 'single_loop') {
@@ -625,7 +630,7 @@ function onVideoEnded() {
   if (nextVideo) {
     const nextUrl = filePathToUrl(nextVideo.filePath)
     if (nextUrl === prevUrl) {
-      console.log('[App] same URL after autoPlayNext, calling playLocalFile directly')
+      logger.info('[App] same URL after autoPlayNext, calling playLocalFile directly')
       videoPlayerRef.value?.playLocalFile(nextUrl)
     }
   }
@@ -640,6 +645,22 @@ function onSettingsSaved(settings: Record<string, any>) {
     store.volume = settings.volume
   }
   logger.info('[App] Settings saved:', Object.keys(settings).join(', '))
+}
+
+// ─── MPV 弹窗播放 ───
+
+function onMpvPlaybackEnded(data: { sessionId: string; exitCode: number }) {
+  logger.info(`[MPV] playbackEnded sessionId=${data.sessionId} exitCode=${data.exitCode}`)
+  store.closeMpv()
+  store.playing = false
+  store.videoPaused = true
+}
+
+function onVlcPlaybackEnded(data: { sessionId: string; exitCode: number }) {
+  logger.info(`[VLC] playbackEnded sessionId=${data.sessionId} exitCode=${data.exitCode}`)
+  store.closeMpv()
+  store.playing = false
+  store.videoPaused = true
 }
 
 // ─── 央视频 webview 事件 ───

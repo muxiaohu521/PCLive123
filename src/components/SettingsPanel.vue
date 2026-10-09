@@ -69,6 +69,40 @@
             <span v-if="ffmpegStatus === 'ok'" class="path-status ok">✓ 检测到 {{ ffmpegVersion }}</span>
             <span v-if="ffmpegStatus === 'fail'" class="path-status fail">✗ {{ ffmpegError }}</span>
           </div>
+          <div class="setting-row vertical">
+            <label>MPV 路径</label>
+            <div class="path-row">
+              <input
+                v-model="localMpvPath"
+                placeholder="例如 D:\\mpv\\mpv.exe"
+                class="input path-input"
+                :class="{ 'path-ok': mpvStatus === 'ok', 'path-fail': mpvStatus === 'fail' }"
+              />
+              <button class="mini-btn" @click="browseMpv" title="浏览选择 mpv 可执行文件">浏览</button>
+              <button class="mini-btn" @click="testMpv" title="测试 MPV 是否可用" :disabled="!localMpvPath || testRunning">
+                {{ testRunning ? '测试中...' : '测试' }}
+              </button>
+            </div>
+            <span v-if="mpvStatus === 'ok'" class="path-status ok">✓ 检测到 {{ mpvVersion }}</span>
+            <span v-if="mpvStatus === 'fail'" class="path-status fail">✗ {{ mpvError }}</span>
+          </div>
+          <div class="setting-row vertical">
+            <label>VLC 路径</label>
+            <div class="path-row">
+              <input
+                v-model="localVlcPath"
+                placeholder="例如 D:\\VLC\\vlc.exe"
+                class="input path-input"
+                :class="{ 'path-ok': vlcStatus === 'ok', 'path-fail': vlcStatus === 'fail' }"
+              />
+              <button class="mini-btn" @click="browseVlc" title="浏览选择 VLC 可执行文件">浏览</button>
+              <button class="mini-btn" @click="testVlc" title="测试 VLC 是否可用" :disabled="!localVlcPath || testRunning">
+                {{ testRunning ? '测试中...' : '测试' }}
+              </button>
+            </div>
+            <span v-if="vlcStatus === 'ok'" class="path-status ok">✓ 检测到 {{ vlcVersion }}</span>
+            <span v-if="vlcStatus === 'fail'" class="path-status fail">✗ {{ vlcError }}</span>
+          </div>
         </div>
 
         <div class="section">
@@ -326,6 +360,8 @@ const defaults = {
   timeout: 10,
   decodeMode: 'auto',
   ffmpegPath: '',
+  mpvPath: '',
+  vlcPath: '',
 }
 
 const localVolume = ref(defaults.volume)
@@ -337,10 +373,18 @@ const localProxy = ref(defaults.proxy)
 const localTimeout = ref(defaults.timeout)
 const localDecodeMode = ref<DecodeMode>(defaults.decodeMode as DecodeMode)
 const localFfmpegPath = ref(defaults.ffmpegPath)
+const localMpvPath = ref(defaults.mpvPath)
+const localVlcPath = ref(defaults.vlcPath)
 
 const ffmpegStatus = ref<'idle' | 'ok' | 'fail'>('idle')
 const ffmpegVersion = ref('')
 const ffmpegError = ref('')
+const mpvStatus = ref<'idle' | 'ok' | 'fail'>('idle')
+const mpvVersion = ref('')
+const mpvError = ref('')
+const vlcStatus = ref<'idle' | 'ok' | 'fail'>('idle')
+const vlcVersion = ref('')
+const vlcError = ref('')
 const testRunning = ref(false)
 
 async function browseFfmpeg() {
@@ -384,6 +428,88 @@ async function testFfmpeg() {
   }
 }
 
+async function browseMpv() {
+  if (!window.electronAPI?.mpvSelectPath) {
+    ElMessage.warning('仅 Electron 环境支持文件选择')
+    return
+  }
+  const result = await window.electronAPI.mpvSelectPath()
+  if (result.success && result.path) {
+    localMpvPath.value = result.path
+    mpvStatus.value = 'idle'
+    mpvVersion.value = ''
+    mpvError.value = ''
+  }
+}
+
+async function testMpv() {
+  if (!window.electronAPI?.mpvTest) {
+    ElMessage.warning('仅 Electron 环境支持 MPV 测试')
+    return
+  }
+  if (!localMpvPath.value) return
+  testRunning.value = true
+  mpvStatus.value = 'idle'
+  try {
+    const result = await window.electronAPI.mpvTest(localMpvPath.value)
+    if (result.success) {
+      mpvStatus.value = 'ok'
+      mpvVersion.value = result.version
+      ElMessage.success('MPV 检测成功')
+    } else {
+      mpvStatus.value = 'fail'
+      mpvError.value = result.error || '无法运行'
+      ElMessage.error('MPV 检测失败: ' + mpvError.value)
+    }
+  } catch (e: any) {
+    mpvStatus.value = 'fail'
+    mpvError.value = e.message || '未知错误'
+  } finally {
+    testRunning.value = false
+  }
+}
+
+async function browseVlc() {
+  if (!window.electronAPI?.vlcSelectPath) {
+    ElMessage.warning('仅 Electron 环境支持文件选择')
+    return
+  }
+  const result = await window.electronAPI.vlcSelectPath()
+  if (result.success && result.path) {
+    localVlcPath.value = result.path
+    vlcStatus.value = 'idle'
+    vlcVersion.value = ''
+    vlcError.value = ''
+  }
+}
+
+async function testVlc() {
+  if (!window.electronAPI?.vlcTest) {
+    ElMessage.warning('仅 Electron 环境支持 VLC 测试')
+    return
+  }
+  if (!localVlcPath.value) return
+  testRunning.value = true
+  vlcStatus.value = 'idle'
+  try {
+    const result = await window.electronAPI.vlcTest(localVlcPath.value)
+    if (result.success) {
+      vlcStatus.value = 'ok'
+      vlcVersion.value = result.version
+      ElMessage.success('VLC 检测成功')
+    } else {
+      vlcStatus.value = 'fail'
+      vlcError.value = result.error || '无法运行'
+      ElMessage.error('VLC 检测失败: ' + vlcError.value)
+    }
+  } catch (e: any) {
+    vlcStatus.value = 'fail'
+    vlcError.value = e.message || '未知错误'
+  } finally {
+    testRunning.value = false
+  }
+}
+
 onMounted(() => {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
@@ -396,6 +522,8 @@ onMounted(() => {
     if (saved.timeout !== undefined) localTimeout.value = saved.timeout
     if (saved.decodeMode !== undefined) localDecodeMode.value = saved.decodeMode
     if (saved.ffmpegPath !== undefined) localFfmpegPath.value = saved.ffmpegPath
+    if (saved.mpvPath !== undefined) localMpvPath.value = saved.mpvPath
+    if (saved.vlcPath !== undefined) localVlcPath.value = saved.vlcPath
   } catch {}
 
   if (store.decodeMode && store.decodeMode !== 'auto') {
@@ -404,6 +532,14 @@ onMounted(() => {
 
   if (store.ffmpegPath) {
     localFfmpegPath.value = store.ffmpegPath
+  }
+
+  if (store.mpvPath) {
+    localMpvPath.value = store.mpvPath
+  }
+
+  if (store.vlcPath) {
+    localVlcPath.value = store.vlcPath
   }
 
   refreshAdFilterData()
@@ -420,10 +556,14 @@ function saveSettings() {
     timeout: localTimeout.value,
     decodeMode: localDecodeMode.value,
     ffmpegPath: localFfmpegPath.value,
+    mpvPath: localMpvPath.value,
+    vlcPath: localVlcPath.value,
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   store.setDecodeMode(localDecodeMode.value)
   store.setFfmpegPath(localFfmpegPath.value)
+  store.setMpvPath(localMpvPath.value)
+  store.setVlcPath(localVlcPath.value)
   store.bumpSubtitleStyleVersion()
   emit('saved', settings)
   ElMessage.success('设置已保存')
@@ -433,7 +573,7 @@ function clearCache() {
   try {
     const preservedKeys = new Set([
       'pclive_sources', 'pclive_current_source', 'pclive_channel_state',
-      'pclive_volume', 'pclive_decode_mode', 'pclive_ffmpeg_path',
+      'pclive_volume', 'pclive_decode_mode', 'pclive_ffmpeg_path', 'pclive_mpv_path', 'pclive_vlc_path',
       'pclive_local_videos', 'pclive_local_play_mode', 'pclive_shortcuts',
       'pclive_settings', 'pclive_source_stats',
     ])
@@ -460,9 +600,17 @@ function resetSettings() {
   localTimeout.value = defaults.timeout
   localDecodeMode.value = (defaults.decodeMode as DecodeMode)
   localFfmpegPath.value = defaults.ffmpegPath
+  localMpvPath.value = defaults.mpvPath
+  localVlcPath.value = defaults.vlcPath
   ffmpegStatus.value = 'idle'
   ffmpegVersion.value = ''
   ffmpegError.value = ''
+  mpvStatus.value = 'idle'
+  mpvVersion.value = ''
+  mpvError.value = ''
+  vlcStatus.value = 'idle'
+  vlcVersion.value = ''
+  vlcError.value = ''
   ElMessage.success('已恢复默认设置，请点击保存')
 }
 

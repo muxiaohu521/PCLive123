@@ -1,4 +1,5 @@
 import { detectAndDecode } from '@/utils/TxtParser'
+import { logger } from '@/utils/logger'
 
 export interface CrawlResult {
   url: string
@@ -57,12 +58,14 @@ function crawlUrlsFromHtml(html: string, baseUrl: string): CrawlResult[] {
 }
 
 export async function crawlSourceUrls(pageUrl: string): Promise<CrawlResult[]> {
+  logger.log('[SourceCrawler] crawling:', pageUrl)
   let html: string
   try {
     const resp = await fetch(pageUrl, { signal: AbortSignal.timeout(10000) })
     const buffer = await resp.arrayBuffer()
     html = detectAndDecode(buffer)
-  } catch {
+  } catch (e) {
+    logger.warn('[SourceCrawler] fetch failed:', (e as Error)?.message || e)
     return []
   }
 
