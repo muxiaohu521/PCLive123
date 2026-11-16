@@ -10,6 +10,8 @@
  * 这是纯逻辑服务，不依赖 Vue/Store/ElectronAPI
  */
 
+import { logger } from '@/utils/logger'
+
 export const NATIVE_PLAYABLE_EXTS = new Set([
   'mp4', 'm4v', 'm4p', 'mov', 'qt',
   'webm', 'ogv', 'ogg', 'oga',
@@ -54,18 +56,41 @@ export function getLocalExt(url: string): string {
   return filename.split('.').pop()?.toLowerCase() || ''
 }
 
+const _nativeExtRegex = new RegExp('\\.(' + Array.from(NATIVE_PLAYABLE_EXTS).join('|') + ')$', 'i')
+
 export function isNativeExt(lowerPath: string): boolean {
-  return /\.(mp4|m4v|m4p|mov|qt|webm|mkv|ogv|ogg|oga|3gp|3g2|3gpp|mp3|m4a|aac|wav|flac|opus|wma|ape|alac|aiff|aif|amr|awb|ac3|eac3|dts|dtshd|pcm|lpcm|spx)$/i.test(lowerPath)
+  return _nativeExtRegex.test(lowerPath)
 }
 
 export function isDirectFormat(lowerPath: string): boolean {
   return /\.(mp4|flv|ts|m2ts|mov|webm|mkv|mp3|m4a|aac|wav|flac|ogg|oga|opus)$/i.test(lowerPath)
 }
 
+/** 是否 MPEG-DASH 清单（.mpd） */
+export function isDashExt(lowerPath: string): boolean {
+  return lowerPath.endsWith('.mpd')
+}
+
+/** 是否 BitTorrent 源（magnet: 链接或 .torrent 文件） */
+export function isTorrentUrl(url: string): boolean {
+  if (url.startsWith('magnet:')) return true
+  const clean = url.split('?')[0].split('#')[0].toLowerCase()
+  return clean.endsWith('.torrent')
+}
+
 export function isUnsupportedProtocol(url: string): string | null {
   if (url.startsWith('rtmp://')) return 'rtmp'
   if (url.startsWith('rtsp://')) return 'rtsp'
   return null
+}
+
+export function isYspCdnUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'ysp.cctv.cn' || host.endsWith('.ysp.cctv.cn')
+  } catch (_) {
+    return false
+  }
 }
 
 export function isRedirectGateway(url: string): boolean {
@@ -118,6 +143,7 @@ export function guessFormatFromGatewayPath(url: string): string | null {
     }
     if (/(188766|52tb|migu)\.xyz$/i.test(host)) return 'm3u8'
     if (/goodiptv\.club$/.test(host) && /\.php\b/i.test(path)) return 'm3u8'
+    if (/\/phenix\.php\b/i.test(path)) return 'flv'
     if (/cntv\.sbs$/.test(host)) return 'm3u8'
     if (/\blitenews\.cn$/.test(host)) return 'm3u8'
     if (/\/pltv\//i.test(path)) return 'm3u8'
@@ -131,6 +157,46 @@ export interface ProbeStreamFn {
   (url: string, headers: Record<string, string>): Promise<{ format: string; finalUrl: string } | null>
 }
 
+export interface GatewayProbeResult {
+  format: string
+  contentType: string
+  finalUrl: string
+  isPlaylist?: boolean
+  isFlv?: boolean
+}
+
+/**
+ * 网关URL格式探测（HEAD请求 + 重定向跟随，不消费body）
+ *
+ * 两步策略:
+ *   第一步: HEAD探测 → 跟进重定向 → 仅获取格式（m3u8/flv/ts/mp4）
+ *   第二步: 从原始网关URL重新发起连接进行播放（不重用第一步的重定向终点URL）
+ *
+ * @param url        原始网关 URL
+ * @param headers    请求头
+ * @param probeFn    Electron IPC 探测回调
+ */
+export async function probeGatewayFormat(
+  url: string,
+  headers: Record<string, string>,
+  probeFn?: (url: string, headers: Record<string, string>) => Promise<GatewayProbeResult>,
+): Promise<ProbeResult> {
+  logger.log('[FormatDetector] probeGatewayFormat:', url.substring(0, 80))
+  if (probeFn) {
+    try {
+      const result = await probeFn(url, { ...headers })
+      if (result && result.format && result.format !== 'unknown') {
+        logger.log('[FormatDetector] probeGatewayFormat result:', result.format)
+        return { format: result.format, finalUrl: url }
+      }
+    } catch (e) {
+      logger.warn('[FormatDetector] probeGatewayFormat error:', (e as Error)?.message || e)
+    }
+  }
+  logger.log('[FormatDetector] probeGatewayFormat: fallback to unknown')
+  return { format: 'unknown', finalUrl: url }
+}
+
 /**
  * 仅用于非网关URL的格式探测（HEAD请求，安全无副作用）
  * 网关URL（PHP redirectors with one-time TOKENs）的格式由 guessFormatFromGatewayPath 推断，
@@ -141,13 +207,16 @@ export async function probeFinalFormat(
   headers: Record<string, string>,
   probeStream?: ProbeStreamFn,
 ): Promise<ProbeResult> {
+  logger.log('[FormatDetector] probeFinalFormat:', url.substring(0, 80))
   if (probeStream) {
     try {
       const result = await probeStream(url, { ...headers })
       if (result && result.format && result.format !== 'unknown') {
+        logger.log('[FormatDetector] probeFinalFormat IPC result:', result.format)
         return { format: result.format, finalUrl: result.finalUrl || url }
       }
-    } catch (_e) {
+    } catch (e) {
+      logger.warn('[FormatDetector] probeFinalFormat IPC error:', (e as Error)?.message || e)
     }
   }
 
@@ -169,9 +238,13 @@ export async function probeFinalFormat(
     if (lower.endsWith('.m3u8') || lower.endsWith('.m3u')) return { format: 'm3u8', finalUrl: resp.url }
     if (lower.endsWith('.flv')) return { format: 'flv', finalUrl: resp.url }
     if (lower.endsWith('.ts') || lower.endsWith('.m2ts')) return { format: 'ts', finalUrl: resp.url }
+    logger.log('[FormatDetector] probeFinalFormat: unknown format from HEAD')
     return { format: 'unknown', finalUrl: resp.url }
-  } catch (_) {}
+  } catch (e) {
+    logger.warn('[FormatDetector] probeFinalFormat HEAD error:', (e as Error)?.message || e)
+  }
 
   const hint = guessFormatFromGatewayPath(url)
+  logger.log('[FormatDetector] probeFinalFormat fallback hint:', hint || 'unknown')
   return { format: hint || 'unknown', finalUrl: url }
 }

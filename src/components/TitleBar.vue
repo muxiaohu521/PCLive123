@@ -2,7 +2,7 @@
   <div class="title-bar" @dblclick="onMaximize">
     <div class="title-bar-left">
       <span class="app-logo">PCLive</span>
-      <span class="app-version">v1.2.0</span>
+      <span class="app-version">v1.4.0</span>
     </div>
     <div class="title-bar-center">
       <template v-if="store.activePlayMode === 'channel'">
@@ -36,8 +36,6 @@
         </span>
       </template>
       <template v-else-if="store.activePlayMode === 'sniffer'">
-        <span class="mode-label">URL 嗅探</span>
-        <span class="separator">|</span>
         <span class="channel-label marquee-wrap" :class="{ active: isLongText(snifferTitle) }">
           <span class="marquee-inner">{{ isLongText(snifferTitle) ? marqueeContent(snifferTitle) : snifferTitle }}</span>
         </span>
@@ -169,7 +167,7 @@ const localVideoCountText = computed(() => {
 })
 
 const snifferTitle = computed(() => {
-  return store.externalPlayInfo?.title || '嗅探中'
+  return store.externalPlayInfo?.title || '解析中'
 })
 
 const yspTitle = computed(() => {

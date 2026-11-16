@@ -2,7 +2,10 @@
   <div class="dlna-panel">
     <div class="dlna-header">
       <h3 class="dlna-title">📡 投屏</h3>
-      <button class="dlna-close" @click="$emit('close')">✕</button>
+      <div class="dlna-header-actions">
+        <button class="dlna-minimize" @click="minimize" title="最小化到左上角状态栏">&#x2500;</button>
+        <button class="dlna-close" @click="$emit('close')">✕</button>
+      </div>
     </div>
 
     <div class="dlna-toolbar">
@@ -187,6 +190,11 @@
       <span class="dlna-log-latest" v-if="!showLogs && logs.length > 0">{{ logs[logs.length - 1].msg }}</span>
     </div>
     <div v-if="showLogs" class="dlna-log-panel">
+      <div class="dlna-log-toolbar">
+        <button class="dlna-log-btn" @click="copyLogs">复制日志</button>
+        <button class="dlna-log-btn" @click="clearLogs">清空</button>
+        <button class="dlna-log-btn" @click="openLogFile">打开日志文件</button>
+      </div>
       <div
         v-for="(entry, i) in logs"
         :key="i"
@@ -204,10 +212,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAppStore } from '@/store'
+import { useCastShell } from '@/tools/cast/useCastShell'
+import { useToolShell } from '@/tools/shared/useToolShell'
 
 const props = defineProps<{
   currentUrl: string
   currentTime: number
+  seekSeq: number
 }>()
 
 defineEmits<{
@@ -215,11 +226,41 @@ defineEmits<{
 }>()
 
 const store = useAppStore()
+const { castSession, castMinimizedAt, registerCastStopHook } = useCastShell()
+const { showBar } = useToolShell()
 
 // --- 日志 ---
 const logs = ref<{ level: string; msg: string; time: string; data?: any }[]>([])
 const showLogs = ref(false)
 let _unsubLog = (() => {})
+let _unsubCastStop: (() => void) | null = null
+
+function copyLogs() {
+  const text = logs.value.map((e) => `[${e.time}] [${e.level}] ${e.msg}`).join('\n')
+  const fallback = () => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy') } catch (_) {}
+    document.body.removeChild(ta)
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(fallback)
+  } else {
+    fallback()
+  }
+}
+
+function clearLogs() {
+  logs.value = []
+}
+
+function openLogFile() {
+  try { window.electronAPI?.tlv1OpenLogFile() } catch (_) {}
+}
 
 // --- TVLive 状态 ---
 const tvliveDevices = ref<TlvDevice[]>([])
@@ -249,8 +290,15 @@ const connectingManual = ref(false)
 const localIps = ref<string[]>([])
 const autoAdbPath = ref('')
 const manualAdbPath = ref('')
-const castFormat = ref<'auto' | 'hls' | 'mpegts'>('auto')
-const castQuality = ref<'original' | '1080p' | '720p' | '480p' | '360p'>('original')
+// 投屏画质/格式参数统一存储在 store，工具箱「投屏」页与投屏面板共享同一份配置
+const castFormat = computed({
+  get: () => store.castFormat,
+  set: (v: 'auto' | 'hls' | 'mpegts') => { store.castFormat = v },
+})
+const castQuality = computed({
+  get: () => store.castQuality,
+  set: (v: 'original' | '1080p' | '720p' | '480p' | '360p') => { store.castQuality = v },
+})
 
 const adbPathDisplay = computed(() => {
   if (manualAdbPath.value) return manualAdbPath.value
@@ -260,6 +308,60 @@ const adbPathDisplay = computed(() => {
 
 const adbPath = computed(() => manualAdbPath.value || autoAdbPath.value)
 const adbIsOverride = computed(() => !!manualAdbPath.value)
+
+// ==================== 最小化 / 状态栏协作 ====================
+
+function minimize() {
+  castMinimizedAt.value = Date.now()
+  store.showDlna = false
+  showBar.value = true
+}
+
+// 将当前投屏状态同步到共享外壳（供左上角最小化状态栏展示/停止）
+function syncCastSession() {
+  const prev = castSession.value
+  const tlvIdx = activeTlvIndex.value
+  const dlnaIdx = activeDlnaIndex.value
+  const tlvDevice = tlvIdx !== null ? tvliveDevices.value[tlvIdx] : null
+  const dlnaDevice = dlnaIdx !== null ? dlnaDevices.value[dlnaIdx] : null
+
+  if (tlvDevice) {
+    castSession.value = {
+      kind: 'tvlive',
+      deviceName: tlvDevice.deviceName || 'TVLive设备',
+      host: tlvDevice.displayHost || tlvDevice.host || '',
+      format: castFormat.value,
+      quality: castQuality.value,
+      startedAt: prev && prev.kind === 'tvlive' ? prev.startedAt : Date.now(),
+    }
+  } else if (dlnaDevice) {
+    castSession.value = {
+      kind: 'dlna',
+      deviceName: dlnaDevice.friendlyName || 'DLNA设备',
+      host: dlnaDevice.host || '',
+      format: 'dlna',
+      quality: '原画',
+      startedAt: prev && prev.kind === 'dlna' ? prev.startedAt : Date.now(),
+    }
+  } else {
+    castSession.value = null
+    castMinimizedAt.value = 0
+  }
+}
+
+// 投屏开始/停止 → 同步状态栏
+watch([activeTlvIndex, activeDlnaIndex], () => {
+  syncCastSession()
+})
+
+// 重新打开投屏面板即退出最小化状态；面板隐藏但仍在投屏时，在左上角状态栏显示入口
+watch(() => store.showDlna, (v) => {
+  if (v) {
+    castMinimizedAt.value = 0
+  } else if (castSession.value) {
+    showBar.value = true
+  }
+})
 
 async function getLocalIps() {
   if (!window.electronAPI) return
@@ -307,11 +409,17 @@ onMounted(() => {
       if (logs.value.length > 200) logs.value.shift()
     })
   }
+  _unsubCastStop = registerCastStopHook(() => {
+    if (activeTlvIndex.value !== null) void tlvStop()
+    else if (activeDlnaIndex.value !== null) void dlnaStop()
+  })
 })
 
 onBeforeUnmount(() => {
   if (_unsubLog) _unsubLog()
+  if (_unsubCastStop) _unsubCastStop()
   if (seekSyncTimer) { clearInterval(seekSyncTimer); seekSyncTimer = null }
+  if (seekSyncDebounce) { clearTimeout(seekSyncDebounce); seekSyncDebounce = null }
 })
 
 // ==================== PC → TV 镜像同步 ====================
@@ -339,6 +447,8 @@ watch(() => props.currentUrl, async (newUrl, oldUrl) => {
       format: castFormat.value,
       quality: castQuality.value,
       position: props.currentTime,
+      headers: { ...(store.currentHeaders || {}) },
+      inputFormat: store.currentFormat,
     })
     if (result.success) {
       activeTlvIndex.value = deviceIdx
@@ -347,6 +457,8 @@ watch(() => props.currentUrl, async (newUrl, oldUrl) => {
       seekLastTime = 0
       seekRestartPending = false
       startSeekSyncTimer()
+      // 频道切换会重新转码，若用户中途改了格式/画质需同步到状态栏
+      syncCastSession()
     }
   } catch (e: any) {
     error.value = '频道切换失败: ' + (e.message || '')
@@ -378,6 +490,25 @@ function startSeekSyncTimer() {
     seekLastTime = now
   }, 2000)
 }
+
+// 跳转播放同步：seekSeq 由主界面 Artplayer 原生 `video:seeking` 事件驱动（onVideoSeek 自增），
+// 在任意跳转（进度条拖动 / seek 接口 / 直播回看）时立即触发，比 2 秒轮询更及时。
+// 用短防抖合并拖动过程中的连续 seeking，只对最终落点 seek 一次。
+let seekSyncDebounce: ReturnType<typeof setTimeout> | null = null
+
+watch(() => props.seekSeq, () => {
+  if (!window.electronAPI || activeTlvIndex.value === null || !activeTlvSessionId) return
+  const api = window.electronAPI
+  if (seekSyncDebounce) clearTimeout(seekSyncDebounce)
+  seekSyncDebounce = setTimeout(() => {
+    seekSyncDebounce = null
+    if (activeTlvIndex.value === null || !activeTlvSessionId) return
+    const pos = Math.round(props.currentTime)
+    seekLastPos = pos
+    seekLastTime = Date.now() / 1000
+    api.tlv1Seek(activeTlvIndex.value!, pos, activeTlvSessionId).catch(() => {})
+  }, 300)
+})
 
 // 暂停/播放同步：PC 暂停/播放 → TV 跟着暂停/播放
 watch(() => store.videoPaused, async (paused) => {
@@ -503,6 +634,8 @@ async function castToTVLive(idx: number) {
       format: castFormat.value,
       quality: castQuality.value,
       position: props.currentTime,
+      headers: { ...(store.currentHeaders || {}) },
+      inputFormat: store.currentFormat,
     })
     if (result.success) {
       activeTlvIndex.value = idx
@@ -640,6 +773,14 @@ async function onVolumeChange(e: Event) {
 }
 
 .dlna-title { font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0; }
+
+.dlna-header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+.dlna-minimize {
+  background: none; border: none; color: #888; font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  line-height: 1;
+}
+.dlna-minimize:hover { color: #fff; background: rgba(255,255,255,0.1); }
 
 .dlna-close {
   background: none; border: none; color: #888; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
@@ -809,6 +950,17 @@ async function onVolumeChange(e: Event) {
   font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; flex-shrink: 0;
 }
 
+.dlna-log-toolbar {
+  display: flex; gap: 6px; padding: 4px 8px; border-bottom: 1px solid #1a1a35;
+  position: sticky; top: 0; background: #080818; z-index: 1;
+}
+.dlna-log-btn {
+  background: #16162e; color: #9aa; border: 1px solid #2a2a4a; border-radius: 4px;
+  padding: 2px 10px; font-size: 11px; cursor: pointer;
+}
+.dlna-log-btn:hover { color: #fff; border-color: #60a5fa; }
+
+
 .dlna-log-entry {
   padding: 2px 18px; white-space: nowrap; border-bottom: 1px solid #0d0d20;
 }
@@ -817,12 +969,12 @@ async function onVolumeChange(e: Event) {
 .dlna-log-level { margin-right: 6px; width: 32px; display: inline-block; text-align: center; font-weight: 600; }
 
 .dlna-log-info  .dlna-log-level { color: #60a5fa; }
-.dlna-log-debg  .dlna-log-level { color: #666; }
+.dlna-log-debug .dlna-log-level { color: #666; }
 .dlna-log-warn  .dlna-log-level { color: #fbbf24; }
-.dlna-log-erro  .dlna-log-level { color: #f87171; }
+.dlna-log-error .dlna-log-level { color: #f87171; }
 .dlna-log-info  .dlna-log-msg   { color: #c0c0d0; }
-.dlna-log-debg  .dlna-log-msg   { color: #555; }
+.dlna-log-debug .dlna-log-msg   { color: #555; }
 .dlna-log-warn  .dlna-log-msg   { color: #fbbf24; }
-.dlna-log-erro  .dlna-log-msg   { color: #f87171; }
+.dlna-log-error .dlna-log-msg   { color: #f87171; }
 
 </style>

@@ -2,10 +2,9 @@
 import { defineStore } from 'pinia'
 import { ChannelService } from '@/services/ChannelService'
 import { logger } from '@/utils/logger'
-import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI } from '@/constants'
-import type { SourceItem, DecodeMode, LocalVideoItem, LocalVideoBranch, PlayMode } from '@/constants'
+import { STORAGE_KEYS, PLAY_MODES, filePathToUrl, hasElectronAPI, SUPPORTED_VIDEO_EXTENSIONS } from '@/constants'
+import type { SourceItem, DecodeMode, LocalVideoItem, LocalVideoBranch, PlayMode, YspChannelItem, YspRoute } from '@/constants'
 import type { LiveChannelGroup, LiveChannelItem, LiveSourceGroup } from '@/models/LiveChannelItem'
-import type { GeoInfo } from '@/utils/GeoService'
 import {
   getChannelUrl,
   getChannelHeaders,
@@ -139,7 +138,7 @@ function loadVolume(): number {
 
 function loadDecodeMode(): DecodeMode {
   const raw = localStorage.getItem(STORAGE_KEYS.DECODE_MODE)
-  if (raw === 'hardware' || raw === 'software' || raw === 'auto' || raw === 'ffmpeg') return raw
+  if (raw === 'hardware' || raw === 'software' || raw === 'auto' || raw === 'mpv' || raw === 'vlc' || raw === 'ffmpeg') return raw
   return 'auto'
 }
 
@@ -156,6 +155,33 @@ function saveFfmpegPath(path: string): void {
     localStorage.setItem(STORAGE_KEYS.FFMPEG_PATH, path)
   } else {
     localStorage.removeItem(STORAGE_KEYS.FFMPEG_PATH)
+  }
+}
+
+function loadMpvPath(): string {
+  const val = localStorage.getItem(STORAGE_KEYS.MPV_PATH) || ''
+  logger.info(`[Store] loadMpvPath: ${val ? val : '(empty)'}`)
+  return val
+}
+
+function saveMpvPath(path: string): void {
+  logger.info(`[Store] saveMpvPath: ${path ? path : '(cleared)'}`)
+  if (path) {
+    localStorage.setItem(STORAGE_KEYS.MPV_PATH, path)
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.MPV_PATH)
+  }
+}
+
+function loadVlcPath(): string {
+  return localStorage.getItem(STORAGE_KEYS.VLC_PATH) || ''
+}
+
+function saveVlcPath(path: string): void {
+  if (path) {
+    localStorage.setItem(STORAGE_KEYS.VLC_PATH, path)
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.VLC_PATH)
   }
 }
 
@@ -279,7 +305,6 @@ export const useAppStore = defineStore('app', () => {
   const connectivityMode = ref<'all' | 'unparsed'>('unparsed')
   const connectivityProgress = ref({ current: 0, total: 0, currentName: '' })
   const showToolsDialog = ref(false)
-  const sourceGeo = ref<Map<string, GeoInfo>>(new Map())
 
   let connectAbortController: AbortController | null = null
 
@@ -292,18 +317,36 @@ export const useAppStore = defineStore('app', () => {
   const showLivesPanel = ref(false)
   const showYspPanel = ref(false)
   const externalPlayInfo = ref<{ url: string; headers: Record<string, string>; format: string; title: string } | null>(null)
+  // 当前 externalPlayInfo 是否来自「视频流解析线路」（applyYspRoute 解析结果）。
+  // 只有来自线路的地址才能按线路元数据重新解析拿全新一次性 token。
+  const externalPlayFromRoute = ref(false)
   const pendingSniffUrl = ref<{ url: string; format: string; name: string } | null>(null)
   const showDlna = ref(false)
+  // 投屏参数（画质/格式）：工具箱「投屏」页统一维护，DlnaPanel 投屏时读取
+  const castQuality = ref<'original' | '1080p' | '720p' | '480p' | '360p'>('original')
+  const castFormat = ref<'auto' | 'hls' | 'mpegts'>('auto')
+  // 播放器「工具」菜单快捷启动请求：下载/录屏直接开始（ts 用于触发重复请求）
+  const toolQuickStart = ref<{ kind: 'download' | 'record'; ts: number } | null>(null)
   const showSyncTVPanel = ref(false)
   const showSettings = ref(false)
   const localChannelsData = ref<LocalChannelsData>({ lives: [] })
   const yspChannels = ref<YspChannelItem[]>([])
   const yspWebviewUrl = ref<string>('')
   const yspWebviewTitle = ref<string>('')
+  const yspCurrentChannelIndex = ref(-1)
+  const yspCurrentRouteIndex = ref(0)
+  const yspIsStreamMode = ref(false)
+  // 视频流解析模式的错误提示（该模式严禁回退网页，解析失败时只提示，不加载任何网页）
+  const yspStreamError = ref<string>('')
+  const mpvActive = ref(false)
   const showLocalChannelsList = ref(false)
   const activeLocalLiveChannelIndex = ref(-1)
   const decodeMode = ref<DecodeMode>(loadDecodeMode())
   const ffmpegPath = ref<string>(loadFfmpegPath())
+  // 内置 FFmpeg：仅供软解（decodeMode='software'）使用，与外置用户选择的 FFmpeg 互斥隔离。
+  const builtinFfmpegPath = ref<string>('')
+  const mpvPath = ref<string>(loadMpvPath())
+  const vlcPath = ref<string>(loadVlcPath())
   const localVideoBranches = ref<LocalVideoBranch[]>(loadLocalVideoBranches())
   const activeLocalVideoBranchId = ref<string>(initActiveBranchId())
 
@@ -378,6 +421,29 @@ export const useAppStore = defineStore('app', () => {
     return ''
   })
 
+  // 悬浮窗「副本播放」同步源描述：悬浮窗据此独立播放与主窗口完全一致的副本。
+  // 仅 Artplayer 播放器（本地视频 / 在线联网视频 / 直播源 / 嗅探 / 视频流解析版）接入本接口。
+  // 官网直播源的网页版（webview）不接入：它没有主窗口 <video>，也不参与录屏 / 悬浮窗 / 投屏 / 画中画。
+  // - stream：内置解码 / 嗅探 / 直播源 / 外部播放器的直链源 → 悬浮窗独立拉流播放
+  // - none：当前无播放
+  const floatSource = computed<{
+    type: 'none' | 'stream'
+    url?: string
+    headers?: Record<string, string>
+    format?: string
+  }>(() => {
+    const url = currentUrl.value
+    if (url) {
+      return {
+        type: 'stream',
+        url,
+        headers: currentHeaders.value,
+        format: currentFormat.value,
+      }
+    }
+    return { type: 'none' }
+  })
+
   const sortedSourceList = computed(() => {
     const stats = sourceStats.value
     const valid: SourceItem[] = []
@@ -435,6 +501,7 @@ function _doPersistSourceStats(): void {
 
   function playExternalUrl(url: string, headers: Record<string, string>, format: string, title: string): void {
     externalPlayInfo.value = { url, headers: headers || {}, format, title }
+    externalPlayFromRoute.value = false
     currentChannel.value = null
     currentLocalVideo.value = null
     activeLocalLiveChannelIndex.value = -1
@@ -445,11 +512,22 @@ function _doPersistSourceStats(): void {
 
   function clearExternalPlay(): void {
     externalPlayInfo.value = null
+    externalPlayFromRoute.value = false
     activeLocalLiveChannelIndex.value = -1
     localLiveChannelSourceIndex.value = 0
     if (activePlayMode.value === 'sniffer' || activePlayMode.value === 'locallive') {
       activePlayMode.value = null
     }
+  }
+
+  function openMpv(): void {
+    mpvActive.value = true
+    logger.info('[Store] openMpv: MPV active')
+  }
+
+  function closeMpv(): void {
+    logger.info(`[Store] closeMpv: was active=${mpvActive.value}`)
+    mpvActive.value = false
   }
 
   function setDecodeMode(mode: DecodeMode): void {
@@ -460,6 +538,32 @@ function _doPersistSourceStats(): void {
   function setFfmpegPath(path: string): void {
     ffmpegPath.value = path
     saveFfmpegPath(path)
+  }
+
+  async function initBuiltinFfmpeg(): Promise<void> {
+    if (typeof window === 'undefined' || !window.electronAPI?.ffmpegGetBuiltinPath) return
+    try {
+      const p = await window.electronAPI.ffmpegGetBuiltinPath()
+      if (p) {
+        builtinFfmpegPath.value = p
+        logger.info(`[Store] builtin ffmpeg resolved: ${p}`)
+      } else {
+        logger.warn('[Store] builtin ffmpeg not found')
+      }
+    } catch (e) {
+      logger.warn('[Store] resolve builtin ffmpeg failed:', e)
+    }
+  }
+
+  function setMpvPath(path: string): void {
+    logger.info(`[Store] setMpvPath: ${path ? path : '(cleared)'}, previous: ${mpvPath.value ? mpvPath.value : '(empty)'}`)
+    mpvPath.value = path
+    saveMpvPath(path)
+  }
+
+  function setVlcPath(path: string): void {
+    vlcPath.value = path
+    saveVlcPath(path)
   }
 
   const subtitleStyleVersion = ref(0)
@@ -501,7 +605,12 @@ function _doPersistSourceStats(): void {
 
   async function parseSourceStat(source: SourceItem, signal?: AbortSignal): Promise<number> {
     try {
-      const groups = await ChannelService.loadChannels(source.url, 0, undefined, undefined, signal, true)
+      const groups = await ChannelService.loadChannelsRobust(source.url, {
+        signal,
+        skipCache: true,
+        maxRetries: 2,
+        clearSeen: false,
+      })
       if (signal?.aborted) return -1
       const totalCh = groups.reduce((sum, g) => sum + g.liveChannels.length, 0)
       sourceStats.value.set(source.url, { channelCount: totalCh, parsedAt: Date.now() })
@@ -514,8 +623,6 @@ function _doPersistSourceStats(): void {
       return 0
     }
   }
-
-  const MAX_RETRIES = 2
 
   async function runConnectivityTest(mode: 'all' | 'unparsed'): Promise<void> {
     if (connectivityTesting.value) return
@@ -556,21 +663,10 @@ function _doPersistSourceStats(): void {
         }
         await yieldTick()
 
-        let result = 0
-        for (let retry = 0; retry <= MAX_RETRIES; retry++) {
-          if (connSignal.aborted) break
-          try {
-            result = await parseSourceStat(s, connSignal)
-          } catch {
-            result = 0
-          }
-          if (result > 0) break
-        }
+        const result = await parseSourceStat(s, connSignal)
+        if (connSignal.aborted) break
 
-        if (!connSignal.aborted && result === 0) {
-          sourceStats.value.set(s.url, { channelCount: 0, parsedAt: Date.now() })
-          persistSourceStats()
-        }
+        if (result === -1) break
       }
 
       flushSourceStats()
@@ -596,16 +692,16 @@ function _doPersistSourceStats(): void {
   }
 
   function addSource(name: string, url: string): 'appended' | 'overwritten' {
-  const existingIdx = sourceList.value.findIndex((s) => s.url === url)
-  if (existingIdx >= 0) {
-    sourceList.value[existingIdx] = { name, url }
+    const existingIdx = sourceList.value.findIndex((s) => s.url === url)
+    if (existingIdx >= 0) {
+      sourceList.value[existingIdx] = { name, url }
+      persistSourceList(sourceList.value)
+      return 'overwritten'
+    }
+    sourceList.value.push({ name, url })
     persistSourceList(sourceList.value)
-    return 'overwritten'
+    return 'appended'
   }
-  sourceList.value.push({ name, url })
-  persistSourceList(sourceList.value)
-  return 'appended'
-}
 
   function removeSource(url: string): void {
     deleteSourceCache(url)
@@ -657,7 +753,6 @@ function _doPersistSourceStats(): void {
     loadAbortController?.abort()
     loadAbortController = new AbortController()
     loadingSourceUrl = targetUrl
-    ChannelService.clearSeenUrls()
     channelsLoading.value = true
     const signal = loadAbortController.signal
     const myController = loadAbortController
@@ -669,13 +764,17 @@ function _doPersistSourceStats(): void {
       currentLivesIndex.value = idx
       channelGroups.value = []
       sourceError.value = ''
-      const result = await ChannelService.loadChannels(
+      const result = await ChannelService.loadChannelsRobust(
         targetUrl,
-        0,
-        livesGroups,
-        channelGroups,
-        signal,
-        skipCache,
+        {
+          sourceIndex: 0,
+          livesGroupsRef: livesGroups,
+          channelGroupsRef: channelGroups,
+          signal,
+          skipCache,
+          maxRetries: 2,
+          clearSeen: true,
+        },
       )
       if (result.length > 0) {
         currentGroupIndex.value = 0
@@ -820,7 +919,11 @@ function _doPersistSourceStats(): void {
     const branch = _activeBranch()
     if (!branch) return 0
     const existingPaths = new Set(branch.videos.map(v => v.filePath))
-    const newVideos = videos.filter(v => !existingPaths.has(v.filePath))
+    const newVideos = videos.filter(v => {
+      if (existingPaths.has(v.filePath)) return false
+      const ext = v.filePath.substring(v.filePath.lastIndexOf('.')).toLowerCase()
+      return (SUPPORTED_VIDEO_EXTENSIONS as readonly string[]).includes(ext)
+    })
     if (newVideos.length > 0) {
       branch.videos.push(...newVideos)
       sortBranchVideos(branch)
@@ -1062,11 +1165,15 @@ function _doPersistSourceStats(): void {
       if (typeof window !== 'undefined' && window.electronAPI?.readYspChannels) {
         const data = await window.electronAPI.readYspChannels()
         if (data && Array.isArray(data.channels)) {
-          yspChannels.value = data.channels
-          logger.info(`[YSP] loaded ${data.channels.length} channels from ysp_channels.json`)
-          if (data.channels.length > 0) {
-            data.channels.forEach((c: any, i: number) => logger.debug(`[YSP]   [${i}] name="${c.name}" url="${(c.url||'').substring(0, 60)}"`))
-          }
+          yspChannels.value = data.channels.map((c: any) => ({
+            name: String(c.name || ''),
+            routes: (Array.isArray(c.routes) ? c.routes : (c.url ? [{ name: '默认', url: c.url }] : [])).map((r: any) => ({
+              name: String(r.name || ''),
+              url: String(r.url || ''),
+              type: r.type === 'ijk' ? 'stream' : (r.type || undefined),
+            })),
+          }))
+          logger.info(`[YSP] loaded ${yspChannels.value.length} channels from ysp_channels.json`)
         } else {
           logger.warn('[YSP] loadYspChannels: invalid data structure', data)
         }
@@ -1083,14 +1190,15 @@ function _doPersistSourceStats(): void {
     logger.debug(`[YSP] saveYspChannels: writing ${count} channels to file...`)
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.writeYspChannels) {
-        // 手动提取纯值，100% 剥离 Vue Proxy，结构化克隆无法序列化 Proxy 对象
-        const plainChannels = yspChannels.value.map((c: any) => ({
+        const plainChannels = yspChannels.value.map((c: YspChannelItem) => ({
           name: String(c.name || ''),
-          url: String(c.url || ''),
-          pid: String(c.pid || ''),
+          routes: (c.routes || []).map((r: YspRoute) => {
+            const route: any = { name: String(r.name || ''), url: String(r.url || '') }
+            if (r.type) route.type = r.type
+            return route
+          }),
         }))
         const payload = { channels: plainChannels }
-        logger.debug(`[YSP] saveYspChannels: plainData channels=${plainChannels.length} first="${plainChannels[0]?.name}"`)
         const ok = await window.electronAPI.writeYspChannels(payload)
         if (ok) {
           logger.info(`[YSP] saveYspChannels: wrote ${count} channels successfully`)
@@ -1105,6 +1213,321 @@ function _doPersistSourceStats(): void {
       logger.error('[YSP] saveYspChannels failed:', e)
       return false
     }
+  }
+
+  // ========== YSP 频道/线路切换 ==========
+
+  const yspCurrentChannel = computed<YspChannelItem | null>(() => {
+    if (yspCurrentChannelIndex.value >= 0 && yspCurrentChannelIndex.value < yspChannels.value.length) {
+      return yspChannels.value[yspCurrentChannelIndex.value]
+    }
+    return null
+  })
+
+  const yspCurrentRoute = computed<YspRoute | null>(() => {
+    const ch = yspCurrentChannel.value
+    if (!ch || !ch.routes || ch.routes.length === 0) return null
+    const idx = Math.min(yspCurrentRouteIndex.value, ch.routes.length - 1)
+    return ch.routes[idx] || null
+  })
+
+  const yspCurrentRouteType = computed(() => {
+    return yspCurrentRoute.value?.type || ''
+  })
+
+  function selectYspChannel(index: number): void {
+    if (index < 0 || index >= yspChannels.value.length) return
+    const ch = yspChannels.value[index]
+    const routes = ch.routes || []
+    if (routes.length === 0) {
+      logger.warn(`[YSP] selectYspChannel: no routes for "${ch.name}"`)
+      return
+    }
+    // 官网直播流默认线路：始终优先选择「视频流解析线路」（type === 'stream'），
+    // 该线路支持下载/录屏/投屏/悬浮窗/画中画等完整功能，便于切频道时无缝镜像。
+    // 若该频道没有 stream 线路，则回退到第一条线路。
+    let routeIndex = 0
+    const streamIdx = routes.findIndex((r) => r.type === 'stream')
+    if (streamIdx >= 0) routeIndex = streamIdx
+    yspCurrentChannelIndex.value = index
+    yspCurrentRouteIndex.value = routeIndex
+    const route = routes[routeIndex]
+    // 清除其他播放模式
+    currentChannel.value = null
+    currentLocalVideo.value = null
+    externalPlayInfo.value = null
+    activeLocalLiveChannelIndex.value = -1
+    activePlayMode.value = null
+    applyYspRoute(route, ch.name)
+  }
+
+  function detectYspSite(url: string): string {
+    try {
+      const host = new URL(url).hostname.toLowerCase()
+      if (host.includes('yangshipin.cn')) return 'yangshipin'
+      if (host.includes('lotustv.mo')) return 'lotustv'
+      if (host.includes('quklive.com')) return 'quklive'
+      if (host.includes('tv.cctv.com') || host.includes('cctv.com')) return 'cctv'
+      if (host.includes('iqilu.com')) return 'iqilu'
+      if (host.includes('mgtv.com')) return 'mgtv'
+      if (host.includes('jstv.com')) return 'jstv'
+      if (host.includes('hkstv.tv')) return 'hkstv'
+      if (host.includes('sxrtv.com')) return 'sxrtv'
+      if (host.includes('gdtv.cn')) return 'gdtv'
+      if (host.includes('jxntv.cn')) return 'jxntv'
+      if (host.includes('hnntv.cn')) return 'hnntv'
+      if (host.includes('gxtv.cn')) return 'gxtv'
+      if (host.includes('snrtv.com')) return 'snrtv'
+      if (host.includes('fjtv.net')) return 'fjtv'
+      if (host.includes('qtv.com.cn')) return 'qtv'
+      if (host.includes('cztv.com')) return 'cztv'
+      if (host.includes('kankanews.com')) return 'kankanews'
+      if (host.includes('gzstv.com')) return 'gzstv'
+      if (host.includes('nmtv.cn')) return 'nmtv'
+      if (host.includes('dbw.cn')) return 'dbw'
+      if (host.includes('hebrts.cn')) return 'hebrtv'
+      if (host.includes('news.hbtv.com.cn')) return 'hbtv'
+      // 未识别站点统一返回 'generic'，交给 sniffer 的通用 HTTP 抓取兜底解析。
+      // 严禁回落到 'yangshipin'，否则会用错误的 pid 走央视频解析导致必然失败，
+      // 表现为“切到视频流解析线路后仍是网页版”。
+      return 'generic'
+    } catch (_) {
+      return 'generic'
+    }
+  }
+
+  // 路由/频道切换请求序号：用于丢弃“过期”的异步解析结果，
+  // 避免快速切换网页版/视频流解析版时旧线程回写覆盖新状态。
+  let yspRouteRequestSeq = 0
+
+  // 播放地址刷新序号：视频流解析模式下播放地址（央视频 CDN m3u8）是一次性 token，
+  // 每次切换解码模式都必须重新解析拿全新 token。该序号变化会强制播放器重新加载，
+  // 即使新旧地址字符串完全一致也能触发重载。
+  const streamRefreshSeq = ref(0)
+
+  // 央视频播放地址 token 有效期约 5 分钟（主进程 YSP_PLAY_URL_CACHE_TTL 对齐）。
+  // 播放过程中必须在过期前主动换新 token，否则 hls.js 续取分片会 403 黑屏。
+  // 央视频 m3u8 为一次性令牌、分片过期后不会触发代理层/播放器的清单续签，故只能靠定时续签。
+  const YSP_TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000
+  let yspTokenRefreshTimer: ReturnType<typeof setInterval> | null = null
+
+  // 由线路地址构造站点解析元数据（站点 + pid + 页面地址）
+  function buildYspSiteMeta(route: YspRoute) {
+    const pidMatch = route.url.match(/[?&]pid=(\d+)/)
+    return {
+      site: detectYspSite(route.url),
+      pid: pidMatch ? pidMatch[1] : undefined,
+      pageUrl: route.url,
+    }
+  }
+
+  // 视频流解析模式：强制清空主进程解析缓存并重新解析，拿到全新一次性 token。
+  // 返回新的播放地址（失败返回空字符串，调用方按原逻辑回退）。
+  async function refreshSnifferStream(): Promise<string> {
+    const route = yspCurrentRoute.value
+    const current = externalPlayInfo.value
+    if (!route || route.type !== 'stream' || !current || !externalPlayFromRoute.value) return ''
+    const meta = buildYspSiteMeta(route)
+    // 未识别站点（generic）无法按站点接口重新签发地址，保持原有重载逻辑。
+    if (!meta.site || meta.site === 'generic') return ''
+    if (typeof window === 'undefined' || !window.electronAPI?.resolvePlayUrl) return ''
+    try {
+      const result = await window.electronAPI.resolvePlayUrl({
+        ...meta,
+        forceRefresh: true,
+      })
+      if (!result || !result.success || !result.urls || result.urls.length === 0) {
+        logger.warn('[YSP] refreshSnifferStream: 重新解析未取得新播放地址')
+        return ''
+      }
+      const fresh = result.urls[0]
+      if (!fresh || !fresh.url) return ''
+      const isM3u8 = fresh.url.toLowerCase().includes('.m3u8')
+      externalPlayInfo.value = {
+        url: fresh.url,
+        headers: fresh.headers || {},
+        format: isM3u8 ? 'm3u8' : '',
+        title: current.title,
+      }
+      streamRefreshSeq.value++
+      logger.info(`[YSP] refreshSnifferStream: 已换用全新一次性 token url="${fresh.url.substring(0, 80)}"`)
+      return fresh.url
+    } catch (e: any) {
+      logger.warn(`[YSP] refreshSnifferStream error: ${e?.message || e}`)
+      return ''
+    }
+  }
+
+  // 判断当前是否处于「央视频视频流解析模式」。
+  // 只有该模式下播放地址才是央视频的一次性 token，需要定时续签。
+  function isYspStreamActive(): boolean {
+    if (activePlayMode.value !== 'sniffer' || !externalPlayFromRoute.value) return false
+    const route = yspCurrentRoute.value
+    if (!route || route.type !== 'stream') return false
+    return buildYspSiteMeta(route).site === 'yangshipin'
+  }
+
+  function stopYspTokenRefresh(): void {
+    if (yspTokenRefreshTimer !== null) {
+      clearInterval(yspTokenRefreshTimer)
+      yspTokenRefreshTimer = null
+    }
+  }
+
+  // 央视频直播流后台定时续签：在 token 过期（约 5 分钟）前主动换新地址，
+  // 避免播放过程中旧 token 被 CDN 回收后分片 403 黑屏。
+  // 每次续签成功都会更新 externalPlayInfo + streamRefreshSeq，触发播放器重载新流。
+  function startYspTokenRefresh(): void {
+    stopYspTokenRefresh()
+    if (!isYspStreamActive()) return
+    yspTokenRefreshTimer = setInterval(() => {
+      // 离开央视频流模式后自动停表，避免后台空转。
+      if (!isYspStreamActive()) {
+        stopYspTokenRefresh()
+        return
+      }
+      // 暂停时跳过续签，避免续签重载把暂停的画面强行播起来。
+      // 恢复播放后若 token 已过期，仍由播放器的 403 兜底逻辑续签。
+      if (!playing.value) return
+      logger.info('[YSP] 定时续签央视频一次性 token（防止 5 分钟过期黑屏）')
+      refreshSnifferStream().catch(() => {})
+    }, YSP_TOKEN_REFRESH_INTERVAL_MS)
+  }
+
+  async function applyYspRoute(route: YspRoute, channelName: string): Promise<void> {
+    const requestSeq = ++yspRouteRequestSeq
+    // 每次切频道/切线路都重建播放上下文，旧频道的定时续签表必须停掉，
+    // 避免残留定时器拿着旧线路元数据重复续签。
+    stopYspTokenRefresh()
+    if (route.type === 'stream') {
+      yspIsStreamMode.value = true
+      yspWebviewUrl.value = ''
+      yspWebviewTitle.value = ''
+      yspStreamError.value = ''
+      // 立即清理上一轮外部播放资源，避免旧视频线程在新地址解析期间继续占用
+      externalPlayInfo.value = null
+      externalPlayFromRoute.value = false
+      // 保持视频流解析模式不变，避免切线路时 activePlayMode 短暂置空导致悬浮窗被关闭
+      activePlayMode.value = 'sniffer'
+
+      let videoUrl = ''
+      let videoHeaders: Record<string, string> = {}
+      if (typeof window !== 'undefined' && window.electronAPI?.resolvePlayUrl) {
+        try {
+          const siteMeta = buildYspSiteMeta(route)
+          const result = await window.electronAPI.resolvePlayUrl(siteMeta)
+          if (result && result.success && result.urls.length > 0) {
+            videoUrl = result.urls[0].url
+            videoHeaders = result.urls[0].headers || {}
+            logger.info(`[YSP] applyYspRoute: stream resolved (site=${siteMeta.site}) url="${videoUrl.substring(0, 80)}"`)
+          } else {
+            logger.warn(`[YSP] applyYspRoute: stream resolve returned no URLs for ${route.url.substring(0, 60)}`)
+          }
+        } catch (e: any) {
+          logger.warn(`[YSP] applyYspRoute: stream resolve error: ${e?.message || e}`)
+        }
+      }
+
+      // 解析期间若发生了新的路由/频道切换，则丢弃本次结果（含异常路径），
+      // 避免旧线程在失败回退时把 webview/stream 状态覆盖回旧频道。
+      if (requestSeq !== yspRouteRequestSeq) {
+        logger.info(`[YSP] applyYspRoute: discard stale resolve result (seq=${requestSeq})`)
+        return
+      }
+
+      if (videoUrl) {
+        const isM3u8 = videoUrl.toLowerCase().includes('.m3u8')
+        const format = isM3u8 ? 'm3u8' : ''
+        yspStreamError.value = ''
+        externalPlayInfo.value = { url: videoUrl, headers: videoHeaders, format, title: `${channelName} (${route.name})` }
+        externalPlayFromRoute.value = true
+        activePlayMode.value = 'sniffer'
+        // 央视频流模式启动后台定时续签（其他站点由 startYspTokenRefresh 内部自检后直接跳过）。
+        startYspTokenRefresh()
+      } else {
+        // 视频流解析模式严禁回退网页：解析失败时保持流模式、清空播放地址并给出提示，
+        // 绝不加载 webview，也绝不把网页地址当成流地址交给播放器/FFmpeg。
+        // 关键：保持 activePlayMode = 'sniffer'，这样播放控制栏的线路切换按钮仍然显示，
+        // 用户可以直接切到其他线路重试；若置为 null，按钮会被 updateControlLabels 隐藏。
+        logger.warn(`[YSP] applyYspRoute: stream resolve failed, webview fallback is disabled in stream mode url="${route.url.substring(0, 60)}"`)
+        yspIsStreamMode.value = true
+        yspWebviewUrl.value = ''
+        yspWebviewTitle.value = ''
+        yspStreamError.value = `${channelName}（${route.name}）未能解析出可播放的直播流地址`
+        externalPlayInfo.value = null
+        externalPlayFromRoute.value = false
+        activePlayMode.value = 'sniffer'
+      }
+    } else {
+      yspIsStreamMode.value = false
+      yspStreamError.value = ''
+      yspWebviewUrl.value = route.url
+      yspWebviewTitle.value = `${channelName} (${route.name})`
+      externalPlayInfo.value = null
+      externalPlayFromRoute.value = false
+      activePlayMode.value = null
+      logger.info(`[YSP] applyYspRoute: webview mode url="${route.url.substring(0, 60)}"`)
+    }
+  }
+
+  function nextYspChannel(): void {
+    if (yspChannels.value.length === 0) return
+    let idx = yspCurrentChannelIndex.value + 1
+    if (idx >= yspChannels.value.length) idx = 0
+    selectYspChannel(idx)
+  }
+
+  function prevYspChannel(): void {
+    if (yspChannels.value.length === 0) return
+    let idx = yspCurrentChannelIndex.value - 1
+    if (idx < 0) idx = yspChannels.value.length - 1
+    selectYspChannel(idx)
+  }
+
+  function nextYspRoute(): void {
+    const ch = yspCurrentChannel.value
+    if (!ch || !ch.routes || ch.routes.length <= 1) return
+    let idx = yspCurrentRouteIndex.value + 1
+    if (idx >= ch.routes.length) idx = 0
+    yspCurrentRouteIndex.value = idx
+    const route = ch.routes[idx]
+    // 切换线路前先清零旧播放状态，确保两种模式互斥
+    externalPlayInfo.value = null
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
+    applyYspRoute(route, ch.name)
+  }
+
+  function prevYspRoute(): void {
+    const ch = yspCurrentChannel.value
+    if (!ch || !ch.routes || ch.routes.length <= 1) return
+    let idx = yspCurrentRouteIndex.value - 1
+    if (idx < 0) idx = ch.routes.length - 1
+    yspCurrentRouteIndex.value = idx
+    const route = ch.routes[idx]
+    // 切换线路前先清零旧播放状态，确保两种模式互斥
+    externalPlayInfo.value = null
+    yspWebviewUrl.value = ''
+    yspWebviewTitle.value = ''
+    applyYspRoute(route, ch.name)
+  }
+
+  function toggleYspPlay(): void {
+    // 模拟点击 webview 中的视频元素
+    if (yspIsStreamMode.value) {
+      // 视频流解析模式：使用 VideoPlayer 控制播放
+      if (videoPaused.value) {
+        playing.value = true
+        videoPaused.value = false
+      } else {
+        playing.value = false
+        videoPaused.value = true
+      }
+    }
+  }
+
+  function toggleYspMute(): void {
+    muted.value = !muted.value
   }
 
   function selectLocalLiveChannel(index: number): void {
@@ -1341,7 +1764,6 @@ function _doPersistSourceStats(): void {
     connectivityMode,
     connectivityProgress,
     showToolsDialog,
-    sourceGeo,
     currentSource,
     channelGroups,
     currentGroupIndex,
@@ -1353,6 +1775,7 @@ function _doPersistSourceStats(): void {
     currentUrl,
     currentHeaders,
     currentFormat,
+    floatSource,
     volume,
     muted,
     playing,
@@ -1364,10 +1787,16 @@ function _doPersistSourceStats(): void {
     externalPlayInfo,
     pendingSniffUrl,
     showDlna,
+    castQuality,
+    castFormat,
+    toolQuickStart,
     showSyncTVPanel,
     showSettings,
     decodeMode,
     ffmpegPath,
+    builtinFfmpegPath,
+    mpvPath,
+    vlcPath,
     localVideoList,
     localVideoBranches,
     activeLocalVideoBranchId,
@@ -1376,6 +1805,7 @@ function _doPersistSourceStats(): void {
     showLocalVideoList,
     activePlayMode,
     initSources,
+    initBuiltinFfmpeg,
     setCurrentSource,
     addSource,
     removeSource,
@@ -1394,6 +1824,8 @@ function _doPersistSourceStats(): void {
     clearExternalPlay,
     setDecodeMode,
     setFfmpegPath,
+    setMpvPath,
+    setVlcPath,
     subtitleStyleVersion,
     bumpSubtitleStyleVersion,
     addLocalVideos,
@@ -1426,6 +1858,25 @@ function _doPersistSourceStats(): void {
     saveYspChannels,
     yspWebviewUrl,
     yspWebviewTitle,
+    yspCurrentChannelIndex,
+    yspCurrentRouteIndex,
+    yspIsStreamMode,
+    yspStreamError,
+    yspCurrentChannel,
+    yspCurrentRoute,
+    yspCurrentRouteType,
+    selectYspChannel,
+    nextYspChannel,
+    prevYspChannel,
+    nextYspRoute,
+    prevYspRoute,
+    streamRefreshSeq,
+    refreshSnifferStream,
+    toggleYspPlay,
+    toggleYspMute,
+    mpvActive,
+    openMpv,
+    closeMpv,
     // 快捷键
     shortcuts,
     matchShortcut,

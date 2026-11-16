@@ -59,6 +59,18 @@ function normalizePlaylist(content) {
 }
 
 /**
+ * 移除网关返回的异常纯数字行。
+ * 部分网关（如虎牙 huya.php 反代）会在 #EXTINF 与分片 URL 之间插入一行无意义的
+ * 纯数字（如 "35"），导致 hls.js 解析失败报 levelParsingError。HLS 中纯数字行
+ * 既不是合法标签（# 开头）也不是合法分片 URI，FFmpeg 内置 HLS 解复用器会自动
+ * 跳过此类行，这里对齐其行为。
+ */
+function stripNumericJunkLines(content) {
+  const linesplit = content.includes('\r\n') ? '\r\n' : '\n'
+  return content.split(linesplit).filter(line => !/^\d+$/.test(line.trim())).join(linesplit)
+}
+
+/**
  * 检查是否为有效的媒体播放列表
  */
 function isPlayablePlaylist(content) {
@@ -184,6 +196,7 @@ function purifyM3u8Playlist(baseUrl, playlistContent) {
   if (!playlistContent || playlistContent.length === 0) return null
   if (playlistContent.startsWith('\ufeff')) playlistContent = playlistContent.substring(1)
   if (!playlistContent.startsWith('#EXTM3U')) return null
+  playlistContent = stripNumericJunkLines(playlistContent)
 
   const totalSegments = (playlistContent.match(/^(?!#)(?=\S)/gm) || []).length
 

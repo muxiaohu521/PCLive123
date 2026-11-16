@@ -61,24 +61,3 @@ export async function getGeoInfo(url: string): Promise<GeoInfo | null> {
     return null
   }
 }
-
-export async function getGeoInfoBatch(urls: string[]): Promise<Map<string, GeoInfo>> {
-  const hostToGeo = new Map<string, GeoInfo>()
-  const uniqueHosts = [...new Set(urls.map(extractHost).filter(Boolean))]
-
-  const promises = uniqueHosts.map(async (host) => {
-    const info = await getGeoInfo('http://' + host)
-    if (info) hostToGeo.set(host, info)
-  })
-
-  await Promise.allSettled(promises)
-
-  const result = new Map<string, GeoInfo>()
-  for (const url of urls) {
-    const host = extractHost(url)
-    if (host && hostToGeo.has(host)) {
-      result.set(url, hostToGeo.get(host)!)
-    }
-  }
-  return result
-}

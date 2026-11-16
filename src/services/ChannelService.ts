@@ -1,14 +1,18 @@
 import { parseToJsonArray, safeStr, stripJsonComments, isJson, detectAndDecode } from '@/utils/TxtParser'
-import { createChannel, buildChannelGroup } from '@/models/LiveChannelItem'
+import { createChannel, buildChannelGroup, scoreChannelUrl } from '@/models/LiveChannelItem'
 import { APP_CONFIG, isElectron } from '@/constants'
 import { logger } from '@/utils/logger'
 import { isAdChannelName } from '@/utils/AdFilter'
 import { crawlSourceUrlsFromHtml } from '@/utils/SourceCrawler'
 import type { LiveChannelGroup, LiveSourceGroup, LiveChannelItem, CacheStorageEntry } from '@/models/LiveChannelItem'
 import type { Ref } from 'vue'
+import { getOptimalThreadCount, runParallel } from '@/utils/ThreadPool'
 
 
 const FETCH_TIMEOUT = APP_CONFIG.FETCH_TIMEOUT
+const STALL_TIMEOUT_MS = 300000 // effectively disabled: let all sub-sources complete
+const DEFAULT_MAX_RETRIES = 2
+const DEFAULT_RETRY_DELAY_MS = 2000
 
 function stripBackticks(s: string): string {
   return s.replace(/^`|`$/g, '').trim()
@@ -27,6 +31,165 @@ function resolveRelativeUrl(baseUrl: string, targetUrl: string): string {
   }
 }
 
+// ============ URL Suffix Stripping & Sanitization (from test_dongli.py) ============
+
+const URL_SUFFIX_UA_RE = /[|$]User-Agent=([^|$]+)/i
+const URL_SUFFIX_REF_RE = /[|$]Referer=([^|$]+)/i
+const URL_SUFFIX_ORIGIN_RE = /[|$]Origin=([^|$]+)/i
+
+function stripUrlSuffix(url: string): { cleanUrl: string; headers: Record<string, string> } {
+  const headers: Record<string, string> = {}
+  let clean = url
+
+  const uaMatch = url.match(URL_SUFFIX_UA_RE)
+  const refMatch = url.match(URL_SUFFIX_REF_RE)
+  const originMatch = url.match(URL_SUFFIX_ORIGIN_RE)
+
+  if (uaMatch) headers['User-Agent'] = uaMatch[1].trim()
+  if (refMatch) headers['Referer'] = refMatch[1].trim()
+  if (originMatch) headers['Origin'] = originMatch[1].trim()
+
+  const pipeIdx = clean.indexOf('|')
+  if (pipeIdx >= 0) clean = clean.substring(0, pipeIdx)
+  const dollarSplit = clean.split(/[#$]/, 2)
+  if (dollarSplit[0] && /^https?:\/\//i.test(dollarSplit[0])) clean = dollarSplit[0]
+
+  return { cleanUrl: clean.trim(), headers }
+}
+
+function sanitizeUrl(url: string): string {
+  try {
+    new URL(url)
+    return url
+  } catch {
+    try {
+      const encoded = encodeURI(url)
+      new URL(encoded)
+      return encoded
+    } catch {
+      return url
+    }
+  }
+}
+
+// ============ Image/Binary Content Detection (from test_dongli.py) ============
+
+const IMAGE_SIGNATURES: Array<{ sig: number[]; label: string }> = [
+  { sig: [0xff, 0xd8, 0xff], label: 'JPEG' },
+  { sig: [0x89, 0x50, 0x4e, 0x47], label: 'PNG' },
+  { sig: [0x47, 0x49, 0x46, 0x38], label: 'GIF' },
+  { sig: [0x42, 0x4d], label: 'BMP' },
+  { sig: [0x52, 0x49, 0x46, 0x46], label: 'RIFF/WEBP' },
+  { sig: [0x00, 0x00, 0x01, 0x00], label: 'ICO' },
+]
+
+function isImageContent(data: Uint8Array): boolean {
+  if (!data || data.length < 4) return false
+  for (const { sig } of IMAGE_SIGNATURES) {
+    if (sig.every((b, i) => data[i] === b)) return true
+  }
+  const head = new TextDecoder('ascii').decode(data.slice(0, 100)).toLowerCase()
+  if (head.startsWith('<svg') || head.startsWith('<?xml')) return true
+  return false
+}
+
+// ============ Binary Latin-1 Stego Scan (from test_dongli.py) ============
+
+const STEGO_MARKER_RE = /[A-Za-z0-9]{8}\*\*/
+
+function bytesToLatin1(bytes: Uint8Array): string {
+  return new TextDecoder('latin-1').decode(bytes)
+}
+
+async function gunzipIfNeeded(bytes: Uint8Array): Promise<Uint8Array> {
+  if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try {
+      const stream = new Response(bytes as unknown as BodyInit).body!.pipeThrough(new DecompressionStream('gzip'))
+      const buf = await new Response(stream).arrayBuffer()
+      return new Uint8Array(buf)
+    } catch { return bytes }
+  }
+  return bytes
+}
+
+function multiEncodingDecode(bytes: Uint8Array): string {
+  for (const enc of ['utf-8', 'gb18030', 'gbk', 'big5']) {
+    try {
+      const result = new TextDecoder(enc, { fatal: false }).decode(bytes)
+      const brokenCount = (result.match(/\uFFFD/g) || []).length
+      if (brokenCount < result.length * 0.01) return result
+    } catch { continue }
+  }
+  return new TextDecoder('latin-1').decode(bytes)
+}
+
+function tryStegoDecode(cleanedB64: string): Promise<string | null> {
+  if (cleanedB64.length < 20) return Promise.resolve(null)
+  for (const b64Text of [cleanedB64, cleanedB64.replace(/\s/g, '')]) {
+    try {
+      const binary = atob(b64Text)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      return gunzipIfNeeded(bytes).then(decompressed => multiEncodingDecode(decompressed))
+    } catch { continue }
+  }
+  return Promise.resolve(null)
+}
+
+async function extractBmpStegoFromBytes(data: Uint8Array): Promise<string | null> {
+  if (!data || data.length < 20) return null
+  const text = bytesToLatin1(data)
+  return extractBmpStegoFromText(text)
+}
+
+async function extractBmpStegoFromText(text: string): Promise<string | null> {
+  if (!text || text.length < 20) return null
+  const markerMatch = text.match(STEGO_MARKER_RE)
+  if (!markerMatch) return null
+  const afterMarker = text.substring(text.indexOf(markerMatch[0]) + 10)
+  const cleanedB64 = afterMarker.replace(/[^A-Za-z0-9+/=\r\n]/g, '')
+  return tryStegoDecode(cleanedB64)
+}
+
+// GitHub mirrors for raw.githubusercontent.com (from test_dongli.py)
+// 同域名也用于代理前缀检测与剥离
+const GITHUB_MIRRORS = [
+  'https://gh-proxy.org/',
+  'https://mirror.ghproxy.com/',
+  'https://gh.llkk.cc/',
+  'https://gh.jiasu.in/',
+  'https://github.moeyy.xyz/',
+  'https://gh.con.sh/',
+  'https://gh.api.99988866.xyz/',
+]
+
+function stripGhProxy(url: string): { strippedUrl: string; wasProxied: boolean } {
+  for (const mirror of GITHUB_MIRRORS) {
+    if (url.startsWith(mirror)) {
+      const inner = url.substring(mirror.length)
+      if (/^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\/.+/i.test(inner)) {
+        return { strippedUrl: inner, wasProxied: true }
+      }
+      return { strippedUrl: inner, wasProxied: true }
+    }
+  }
+  // URL 本身可能就是 raw.githubusercontent.com（无需剥离）
+  if (/^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\/.+/i.test(url)) {
+    return { strippedUrl: url, wasProxied: false }
+  }
+  return { strippedUrl: url, wasProxied: false }
+}
+
+// Channel URL quality scoring: stream URLs get priority, junk extensions get blocked
+export function filterAndRankUrls(urls: string[]): string[] {
+  if (!urls || urls.length === 0) return []
+  const scored = urls
+    .map(u => ({ url: u, score: scoreChannelUrl(u) }))
+    .filter(item => item.score >= 0)
+  scored.sort((a, b) => a.score - b.score)
+  return scored.map(item => item.url)
+}
+
 // --- Crypto utilities for FindResult ---
 
 function rightPadding(str: string, padChar: string, len: number): string {
@@ -40,12 +203,6 @@ function hexToUint8Array(hexStr: string): Uint8Array {
     arr[i] = parseInt(hexStr.substring(i * 2, i * 2 + 2), 16)
   }
   return arr
-}
-
-function bytesToLatin1(bytes: Uint8Array): string {
-  let s = ''
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i])
-  return s
 }
 
 function atobToUtf8(b64: string): string {
@@ -82,26 +239,16 @@ async function FindResult(rawContent: string, configKey?: string): Promise<strin
   try {
     if (isJson(content)) return content
 
-    const markerMatch = content.match(/[A-Za-z0-9]{8}\*\*/)
-    if (markerMatch) {
-      logger.log('[FindResult] BMP stego marker found:', markerMatch[0])
-      const afterMarker = content.substring(content.indexOf(markerMatch[0]) + 10)
-      const cleanedB64 = afterMarker.replace(/[^A-Za-z0-9+/=\r\n]/g, '')
-      try {
-        content = atobToUtf8(cleanedB64)
-        logger.log('[FindResult] BMP stego decoded, length:', content.length)
-      } catch (_) {
-        try {
-          content = atobToUtf8(cleanedB64.replace(/\s/g, ''))
-          logger.log('[FindResult] BMP stego decoded (no whitespace), length:', content.length)
-        } catch (_) {
-          logger.log('[FindResult] BMP stego decode failed')
-        }
-      }
+    // 1. BMP stego marker in text content (after text decode)
+    const stegoTextResult = await extractBmpStegoFromText(content)
+    if (stegoTextResult) {
+      content = stegoTextResult
+      logger.log('[FindResult] BMP stego from text decoded, length:', content.length)
     }
 
     content = content.trim()
 
+    // 2. 2423 AES-CBC decryption
     if (content.startsWith('2423')) {
       logger.log('[FindResult] 2423 encrypted content detected')
       content = content.replace(/\s+/g, '')
@@ -125,6 +272,7 @@ async function FindResult(rawContent: string, configKey?: string): Promise<strin
         }
       }
     } else if (configKey && !isJson(content)) {
+      // 3. AES-ECB decrypt with config key
       logger.log('[FindResult] Attempting AES-ECB decrypt with config key')
       const keyBytes = stringToUint8Array(rightPadding(configKey, '0', 16)).slice(0, 16)
       try {
@@ -139,40 +287,41 @@ async function FindResult(rawContent: string, configKey?: string): Promise<strin
       } catch (_) {}
     }
 
-    if (!isJson(content) && content.length > 20) {
+    // 4. Pure base64 + gzip decode
+    if (!isJson(content) && content.length > 40) {
       const cleanedContent = content.replace(/\s/g, '')
-      try {
-        const binary = atob(cleanedContent)
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      if (/^[A-Za-z0-9+/=]+$/.test(cleanedContent)) {
+        try {
+          const binary = atob(cleanedContent)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
 
-        let decoded: string | null = null
-        if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
-          try {
-            const stream = new Response(bytes as unknown as BodyInit).body!.pipeThrough(new DecompressionStream('gzip'))
-            decoded = await new Response(stream).text()
-            logger.log('[FindResult] Base64 + gzip decompressed, length:', decoded.length)
-          } catch {
-            logger.log('[FindResult] Base64 + gzip decompress failed')
+          const decompressed = await gunzipIfNeeded(bytes)
+          const decoded = multiEncodingDecode(decompressed)
+
+          const trimmed = decoded.trim()
+          if (trimmed.startsWith('{') || trimmed.startsWith('[') ||
+              trimmed.startsWith('#EXTM3U') || trimmed.includes(',http')) {
+            content = decoded
+            logger.log('[FindResult] Base64 + gzip decoded, length:', content.length)
+          } else {
+            const plainDecoded = atobToUtf8(cleanedContent)
+            if (plainDecoded.trim().startsWith('{') || plainDecoded.trim().startsWith('[') ||
+                plainDecoded.trim().startsWith('#EXTM3U') || plainDecoded.includes(',http')) {
+              content = plainDecoded
+              logger.log('[FindResult] Base64 decoded (no gzip), length:', content.length)
+            }
           }
-        }
-
-        if (!decoded) {
-          decoded = atobToUtf8(cleanedContent)
-        }
-
-        if (isJson(decoded) || decoded.startsWith('#EXTM3U') || decoded.includes(',http')) {
-          content = decoded
-          logger.log('[FindResult] Base64 decoded, length:', content.length)
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
 
-    if (!isJson(content) && (content.includes('http://') || content.includes('https://'))) {
-      const urlMatch = content.match(/^https?:\/\/[^\s]+\.(m3u|m3u8)/i)
+    // 5. Extract M3U redirect URL from plain text
+    if (!isJson(content) && /^https?:\/\//i.test(content.trim())) {
+      const urlMatch = content.trim().match(/^(https?:\/\/[^\s]+\.(?:m3u|m3u8))/i)
       if (urlMatch) {
         content = urlMatch[0]
-        logger.log('[FindResult] M3U URL extracted:', content)
+        logger.log('[FindResult] M3U URL extracted:', content.substring(0, 80))
       }
     }
   } catch (_) {}
@@ -214,7 +363,7 @@ function extractJsonFromHtml(content: string): string {
     }
   }
 
-  for (const marker of ['"lives"', '"sites"', '"spider"']) {
+  for (const marker of ['"lives"', '"sites"', '"spider"', '"urls"']) {
     const idx = s.indexOf(marker)
     if (idx < 0) continue
     let braceStart = s.lastIndexOf('{', idx)
@@ -320,6 +469,58 @@ function extractLivesGroups(jsonStr: string): LiveSourceGroup[] {
           logger.log('[extractLivesGroups] Spider assigned to live:', grp.name,
             'spiderApi:', defaultSpiderJar.substring(0, 80))
         }
+        if (grp.type === '3') {
+          const api = safeStr(entry.api, '')
+          const jar = safeStr(entry.jar, '')
+          const ext = entry.ext
+          const effectiveJar = jar || defaultSpiderJar
+
+          const extUrls: string[] = []
+          if (ext && typeof ext === 'object' && !Array.isArray(ext)) {
+            for (const v of Object.values(ext)) {
+              if (typeof v === 'string' && /^https?:\/\//i.test(v)) {
+                extUrls.push(stripBackticks(v))
+              }
+            }
+          } else if (typeof ext === 'string' && /^https?:\/\//i.test(ext)) {
+            extUrls.push(stripBackticks(ext))
+          }
+
+          if (extUrls.length > 0 && (!grp.url || !/^https?:\/\//i.test(grp.url))) {
+            for (let ei = 0; ei < extUrls.length; ei++) {
+              const extUrl = extUrls[ei]
+              const subName = extUrls.length > 1 ? grp.name + '_' + (ei + 1) : grp.name
+              const extGrp = buildSourceGroup({ name: subName, url: extUrl, type: '0' }, idx)
+              const spiderApiUrl = api && /^https?:\/\//i.test(api) ? api : effectiveJar
+              if (spiderApiUrl && /^https?:\/\//i.test(spiderApiUrl)) {
+                extGrp.spiderApi = spiderApiUrl
+                extGrp.spiderExt = extUrl
+                extGrp.spiderJar = effectiveJar
+              }
+              groups.push(extGrp)
+              logger.log('[extractLivesGroups] Type-3 live ext URL:', subName, extUrl,
+                'spider:', spiderApiUrl ? spiderApiUrl.substring(0, 80) : '(none)')
+            }
+          } else {
+            const extStr = typeof ext === 'string' ? stripBackticks(ext) : (ext && typeof ext === 'object' && extUrls.length === 0 ? JSON.stringify(ext) : '')
+            if (api && /^https?:\/\//i.test(api)) {
+              grp.spiderApi = api
+              grp.spiderExt = extStr || grp.url
+              grp.spiderJar = effectiveJar
+              logger.log('[extractLivesGroups] Spider type=3 live:', grp.name,
+                'spiderApi:', api.substring(0, 80),
+                'jar:', (effectiveJar || '(none)'))
+            } else if (effectiveJar) {
+              grp.spiderApi = effectiveJar
+              grp.spiderExt = grp.url
+              grp.spiderJar = effectiveJar
+              logger.log('[extractLivesGroups] Spider type=3 live (fallback):', grp.name,
+                'spiderApi:', effectiveJar.substring(0, 80))
+            }
+            groups.push(grp)
+          }
+          continue
+        }
         groups.push(grp)
       }
     }
@@ -365,24 +566,39 @@ function extractLivesGroups(jsonStr: string): LiveSourceGroup[] {
         const siteType = safeStr(site.type, '1')
         if (siteType === '3') {
           const spiderApi = stripBackticks(safeStr(site.api, ''))
-          const extUrl = typeof site.ext === 'string' ? stripBackticks(site.ext) : ''
+          const ext = site.ext
           const extName = safeStr(site.name, 'ext' + (idx + 1))
           const jar = stripBackticks(safeStr(site.jar, ''))
           const effectiveJar = jar || defaultSpiderJar
 
-          if (extUrl && /^https?:\/\//i.test(extUrl)) {
-            logger.log('[extractLivesGroups] Type-3 site ext URL added:', extName, extUrl, 'jar:', effectiveJar || '(none)')
-            const grp = buildSourceGroup({ name: extName, url: extUrl, type: '0' }, idx)
-            if (spiderApi && /^https?:\/\//i.test(spiderApi)) {
-              grp.spiderApi = spiderApi
-              grp.spiderExt = extUrl
-              grp.spiderJar = effectiveJar
+          const extUrls: string[] = []
+          if (ext && typeof ext === 'object' && !Array.isArray(ext)) {
+            for (const v of Object.values(ext)) {
+              if (typeof v === 'string' && /^https?:\/\//i.test(v)) {
+                extUrls.push(stripBackticks(v))
+              }
             }
-            groups.push(grp)
+          } else if (typeof ext === 'string' && /^https?:\/\//i.test(ext)) {
+            extUrls.push(stripBackticks(ext))
+          }
+
+          if (extUrls.length > 0) {
+            for (let ei = 0; ei < extUrls.length; ei++) {
+              const extUrl = extUrls[ei]
+              const subName = extUrls.length > 1 ? `${extName}_${ei + 1}` : extName
+              logger.log('[extractLivesGroups] Type-3 site ext URL added:', subName, extUrl, 'jar:', effectiveJar || '(none)')
+              const grp = buildSourceGroup({ name: subName, url: extUrl, type: '0' }, idx)
+              if (spiderApi && /^https?:\/\//i.test(spiderApi)) {
+                grp.spiderApi = spiderApi
+                grp.spiderExt = extUrl
+                grp.spiderJar = effectiveJar
+              }
+              groups.push(grp)
+            }
           } else if (spiderApi && /^https?:\/\//i.test(spiderApi)) {
             const grp = buildSourceGroup({ name: extName, url: spiderApi, type: '0' }, idx)
             grp.spiderApi = spiderApi
-            grp.spiderExt = extUrl
+            grp.spiderExt = ''
             grp.spiderJar = effectiveJar
             groups.push(grp)
             logger.log('[extractLivesGroups] Type-3 spider API added:', extName, spiderApi.substring(0, 80), 'jar:', effectiveJar || '(none)')
@@ -448,12 +664,16 @@ async function fetchData(url: string, headers: Record<string, string> = {}, sign
   if (url.startsWith('data:')) {
     const [, payload] = url.split(',', 2)
     if (url.includes(';base64,')) {
-      const binary = atob(payload)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i)
+      try {
+        const binary = atob(payload)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i)
+        }
+        return new TextDecoder().decode(bytes)
+      } catch {
+        throw new Error('Invalid base64 data URI')
       }
-      return new TextDecoder().decode(bytes)
     }
     return decodeURIComponent(payload)
   }
@@ -473,6 +693,10 @@ async function fetchData(url: string, headers: Record<string, string> = {}, sign
     } else {
       result = await window.electronAPI.fetchUrl(url, headers)
     }
+    // Guard against oversized responses
+    if (typeof result === 'string' && result.length > MAX_RESPONSE_SIZE) {
+      throw new Error(`Response too large: ${(result.length / 1024 / 1024).toFixed(1)}MB (max ${MAX_RESPONSE_SIZE / 1024 / 1024}MB)`)
+    }
     if (typeof result === 'string') return result
     if (result && typeof result === 'object') return JSON.stringify(result)
     return String(result)
@@ -489,6 +713,23 @@ async function fetchData(url: string, headers: Record<string, string> = {}, sign
     throw new Error(`HTTP ${resp.status} ${resp.statusText}`)
   }
   const buf = await resp.arrayBuffer()
+  if (buf.byteLength > MAX_RESPONSE_SIZE) {
+    throw new Error(`Response too large: ${(buf.byteLength / 1024 / 1024).toFixed(1)}MB (max ${MAX_RESPONSE_SIZE / 1024 / 1024}MB)`)
+  }
+  const rawBytes = new Uint8Array(buf)
+
+  // Binary-level BMP stego scan on raw bytes (from test_dongli.py)
+  const stegoFromBytes = await extractBmpStegoFromBytes(rawBytes)
+  if (stegoFromBytes) {
+    logger.log('[fetchData] BMP stego extracted from raw bytes, length:', stegoFromBytes.length)
+    return stegoFromBytes
+  }
+
+  // Check if response is an image (will be detected as binary later)
+  if (isImageContent(rawBytes)) {
+    logger.log('[fetchData] Response appears to be an image file, trying text decode anyway...')
+  }
+
   return detectAndDecode(buf)
 }
 
@@ -507,6 +748,7 @@ async function fetchDataWithRetry(url: string, headers: Record<string, string> =
       }
     } catch (e: unknown) {
       lastError = e
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       if (attempt < maxRetries) {
         const delay = (attempt + 1) * 500
         logger.log('[ChannelService] Fetch failed (attempt ' + (attempt + 1) + '/' + (maxRetries + 1) + '), retrying in ' + delay + 'ms:', url)
@@ -520,6 +762,54 @@ async function fetchDataWithRetry(url: string, headers: Record<string, string> =
       }
     }
   }
+
+  // GitHub mirror fallback (from test_dongli.py fetch_url_smart)
+  // 策略：剥离代理前缀 → 直连原始GitHub URL → 失败后轮换镜像站
+  if (/github/i.test(url)) {
+    const { strippedUrl, wasProxied } = stripGhProxy(url)
+
+    // Step 1: 如果原始URL带了代理前缀，剥离后先尝试直连
+    if (wasProxied && strippedUrl !== url) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      logger.log('[ChannelService] Proxy stripped, trying direct:', strippedUrl.substring(0, 80))
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT)
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); ctrl.abort() }, { once: true })
+        try {
+          const result = await fetchData(strippedUrl, headers, ctrl.signal)
+          logger.log('[ChannelService] Direct connection succeeded after proxy strip')
+          return result
+        } finally {
+          clearTimeout(timer)
+        }
+      } catch {
+        logger.log('[ChannelService] Direct connection failed, trying mirrors...')
+      }
+    }
+
+    // Step 2: 直连失败 → 用去代理后的原始GitHub URL依次尝试镜像站
+    for (const mirror of GITHUB_MIRRORS) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const mirrorUrl = mirror + strippedUrl
+      logger.log('[ChannelService] Trying GitHub mirror:', mirrorUrl.substring(0, 80))
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT / 2)
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); ctrl.abort() }, { once: true })
+        try {
+          const result = await fetchData(mirrorUrl, headers, ctrl.signal)
+          logger.log('[ChannelService] GitHub mirror succeeded:', mirror)
+          return result
+        } finally {
+          clearTimeout(timer)
+        }
+      } catch {
+        logger.log('[ChannelService] GitHub mirror failed:', mirror)
+      }
+    }
+  }
+
   throw lastError
 }
 
@@ -541,7 +831,7 @@ function parseLiveData(text: string): LiveChannelGroup[] {
   }).filter(g => g.liveChannels.length > 0)
 }
 
-function detectContentFormat(content: string): 'json' | 'json-array' | 'm3u' | 'txt' | 'html' | 'unknown' {
+function detectContentFormat(content: string): 'json' | 'json-array' | 'm3u' | 'txt' | 'html' | 'csv' | 'yaml' | 'jsonp' | 'url-list' | 'm3u-redirect' | 'unknown' {
   if (!content || content.length < 4) return 'unknown'
   const s = content.trim()
 
@@ -576,6 +866,8 @@ function detectContentFormat(content: string): 'json' | 'json-array' | 'm3u' | '
   }
 
   if (/^https?:\/\//i.test(s.split('\n')[0].trim())) {
+    const firstLine = s.split('\n')[0].trim()
+    if (/\.(?:m3u8?)(?:\?|$)/i.test(firstLine)) return 'm3u-redirect'
     return 'txt'
   }
 
@@ -612,6 +904,7 @@ function parseVodXmlHome(xml: string): VodVideoItem[] {
   const videoBlocks = xml.match(/<video>[\s\S]*?<\/video>/gi) || xml.match(/<item>[\s\S]*?<\/item>/gi) || []
   for (const block of videoBlocks) {
     const id = (block.match(/<id>[\s\S]*?<\/id>/i) || [''])[0].replace(/<\/?id>/gi, '').trim()
+      .replace(/<!\[CDATA\[|\]\]>/g, '')
     const name = (block.match(/<name>[\s\S]*?<\/name>/i) || [''])[0]
       .replace(/<\/?name>/gi, '').trim()
       .replace(/<!\[CDATA\[|\]\]>/g, '')
@@ -781,7 +1074,7 @@ async function fetchVodSiteChannels(apiUrl: string, siteName: string, headers: R
 
   let homeXml: string
   try {
-    if (signal?.aborted) return null; homeXml = await fetchData(buildVodApiUrl(baseApi, 'home'), headers, signal)
+    if (signal?.aborted) return null; homeXml = await fetchDataWithRetry(buildVodApiUrl(baseApi, 'home'), headers, 1, signal)
   } catch (e) {
     logger.log('[VOD] Home fetch failed for', siteName, e instanceof Error ? e.message : e)
     return null
@@ -946,11 +1239,9 @@ function parseSpiderVodHome(spiderKey: string, homeData: string): LiveChannelGro
     buildChannelGroup(name, channels))
 }
 
-const seenUrls = new Map<string, boolean>()
-const MAX_SEEN_URLS = 200
-let seenUrlInsertOrder: string[] = []
-
 const FLUSH_THROTTLE_MS = 500
+const RATE_LIMIT_MS = 200
+const MAX_RESPONSE_SIZE = 50 * 1024 * 1024
 
 function hasChannelCacheAPI(): boolean {
   return isElectron()
@@ -978,14 +1269,40 @@ async function deleteCacheEntry(url: string): Promise<void> {
 }
 
 
-function addSeenUrl(url: string): void {
-  if (seenUrls.has(url)) return
-  seenUrls.set(url, true)
-  seenUrlInsertOrder.push(url)
-  while (seenUrlInsertOrder.length > MAX_SEEN_URLS) {
-    const oldest = seenUrlInsertOrder.shift()
-    if (oldest) seenUrls.delete(oldest)
+// ============ GROUP MERGE UTILITY ============
+
+function makeGroupKey(subLineName: string, groupName: string): string {
+  return JSON.stringify([subLineName, groupName])
+}
+
+function mergeChannelGroups(oldGroups: LiveChannelGroup[], newGroups: LiveChannelGroup[]): LiveChannelGroup[] {
+  if (oldGroups.length === 0) return newGroups
+  if (newGroups.length === 0) return oldGroups
+
+  const resultMap = new Map<string, LiveChannelGroup>()
+
+  for (const g of oldGroups) {
+    const key = makeGroupKey(g.subLineName, g.groupName)
+    resultMap.set(key, g)
   }
+
+  let overwrittenCount = 0
+  let appendedCount = 0
+
+  for (const g of newGroups) {
+    const key = makeGroupKey(g.subLineName, g.groupName)
+    if (resultMap.has(key)) {
+      overwrittenCount++
+    } else {
+      appendedCount++
+    }
+    resultMap.set(key, g)
+  }
+
+  const preservedCount = oldGroups.length - overwrittenCount
+  logger.log('[mergeChannelGroups] Merged:', overwrittenCount, 'overwritten,', appendedCount, 'appended,', preservedCount, 'preserved (total:', resultMap.size, 'groups)')
+
+  return Array.from(resultMap.values())
 }
 
 // ============ MAIN CHANNEL SERVICE ============
@@ -1001,6 +1318,20 @@ function filterBySourceIndex(groups: LiveChannelGroup[], sourceIndex: number, co
 export const ChannelService = {
   async loadChannels(sourceUrl: string, sourceIndex: number = 0, livesGroupsRef?: Ref<LiveSourceGroup[]>, channelGroupsRef?: Ref<LiveChannelGroup[]>, signal?: AbortSignal, skipCache: boolean = false): Promise<LiveChannelGroup[]> {
     if (signal?.aborted) return []
+
+    // Per-call seen URL tracking (avoids cross-call contamination)
+    const seenUrls = new Map<string, boolean>()
+    const MAX_SEEN_URLS = 200
+    let seenUrlInsertOrder: string[] = []
+    function addSeenUrl(url: string): void {
+      if (seenUrls.has(url)) return
+      seenUrls.set(url, true)
+      seenUrlInsertOrder.push(url)
+      while (seenUrlInsertOrder.length > MAX_SEEN_URLS) {
+        const oldest = seenUrlInsertOrder.shift()
+        if (oldest) seenUrls.delete(oldest)
+      }
+    }
 
     if (window.electronAPI?.fetchUrl) {
       const { setFetchUrlFunc, setFetchUrlFullFunc } = await import('./SpiderService')
@@ -1065,7 +1396,7 @@ export const ChannelService = {
     logger.log('[ChannelService] Config data length:', rawData.length,
       'preview:', rawData.substring(0, 200).replace(/[\r\n]/g, ' '))
 
-    const processedConfig = await FindResult(rawData)
+    let processedConfig = await FindResult(rawData)
     logger.log('[ChannelService] Processed config length:', processedConfig.length,
       'preview:', processedConfig.substring(0, 200).replace(/[\r\n]/g, ' '))
 
@@ -1090,24 +1421,38 @@ export const ChannelService = {
       }
     }
 
-    if (livesGroupsRef) {
-      livesGroupsRef.value = configLives
-    }
     if (channelGroupsRef) {
       channelGroupsRef.value = []
     }
     const allGroups: LiveChannelGroup[] = []
 
+    const oldCached = skipCache ? await readCacheEntry(sourceUrl) : null
+    const oldCachedGroups: LiveChannelGroup[] = (oldCached && Array.isArray(oldCached.data)) ? oldCached.data : []
+    if (oldCachedGroups.length > 0) {
+      logger.log('[ChannelService] Found old cached data:', oldCachedGroups.length, 'groups, will perform precise merge')
+    }
+
+    let lastMerged: LiveChannelGroup[] = []
+
+    const getMergedResult = (): LiveChannelGroup[] => {
+      if (oldCachedGroups.length === 0) return allGroups
+      if (allGroups.length === 0) return oldCachedGroups
+      return lastMerged.length > 0 ? lastMerged : mergeChannelGroups(oldCachedGroups, allGroups)
+    }
+
     let completedCount = 0
     const flushSnapshot = async () => {
-      if (allGroups.length === 0) return
+      if (allGroups.length === 0 && oldCachedGroups.length === 0) return
+      const merged = mergeChannelGroups(oldCachedGroups, allGroups)
+      lastMerged = merged
+      const effectiveComplete = oldCachedGroups.length > 0 ? configLives.length : completedCount
       await writeCacheEntry(sourceUrl, {
-        data: [...allGroups],
+        data: merged,
         livesGroups: configLives,
         time: Date.now(),
-        completedCount
+        completedCount: effectiveComplete
       })
-      if (channelGroupsRef) channelGroupsRef.value = filterBySourceIndex([...allGroups], sourceIndex, configLives)
+      if (channelGroupsRef) channelGroupsRef.value = filterBySourceIndex(merged, sourceIndex, configLives)
     }
     const flushTimer = setInterval(flushSnapshot, FLUSH_THROTTLE_MS)
 
@@ -1115,18 +1460,58 @@ export const ChannelService = {
     let stallAborted = false
     const stallCheckTimer = configLives.length > 0 ? setInterval(() => {
       if (stallAborted) return
-      if (Date.now() - lastGroupAddTime > 30000) {
-        logger.log('[ChannelService] No valid data received for 30s, parsing complete')
+      if (Date.now() - lastGroupAddTime > STALL_TIMEOUT_MS) {
+        logger.log('[ChannelService] No valid data received for ' + (STALL_TIMEOUT_MS / 1000) + 's, parsing complete')
         stallAborted = true
       }
     }, 1000) : null
 
     try {
     if (configLives.length === 0) {
-      const format = detectContentFormat(processedConfig)
+      let format = detectContentFormat(processedConfig)
       logger.log('[ChannelService] No TVBox lives found, content format:', format)
 
-      if (format === 'html') {
+      
+      // Handle M3U redirect: response is just a URL to an actual M3U playlist
+      if (format === 'm3u-redirect') {
+        const redirectUrl = processedConfig.trim().split('\n')[0].trim()
+        logger.log('[ChannelService] → M3U redirect detected, following:', redirectUrl.substring(0, 80))
+        processedConfig = await fetchDataWithRetry(redirectUrl, {}, 1, signal)
+        if (processedConfig && processedConfig.length > 50) {
+          processedConfig = await FindResult(processedConfig)
+          format = detectContentFormat(processedConfig)
+          logger.log('[ChannelService] → After redirect, content format:', format)
+        }
+      }
+const looksLikeBinary = format === 'unknown' &&
+        (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(processedConfig.substring(0, 500)) ||
+         !/[A-Za-z0-9]/.test(processedConfig.substring(0, 200)))
+      if (looksLikeBinary) {
+        logger.log('[ChannelService] Response appears to be binary/image, trying fallback TVBox paths...')
+        const baseForFallback = sourceUrl.replace(/\$.*$/, '').replace(/\/+$/, '')
+        for (const tvPath of ['/tv', '/api', '/wex.json', '/tvbox']) {
+          if (signal?.aborted) break
+          try {
+            const fbUrl = baseForFallback + tvPath
+            logger.log('[ChannelService] → Fallback try:', fbUrl)
+            const fbData = await fetchDataWithRetry(fbUrl, {}, 1, signal)
+            if (fbData && fbData.length > 50) {
+              const fbProcessed = await FindResult(fbData)
+              const fbJson = extractJsonFromHtml(fbProcessed)
+              const fbLives = extractLivesGroups(fbJson)
+              if (fbLives.length > 0) {
+                configLives = fbLives
+                logger.log('[ChannelService] → Fallback succeeded at', tvPath, ':', fbLives.length, 'sub-lines')
+                break
+              }
+            }
+          } catch (_) {
+            logger.log('[ChannelService] → Fallback failed:', tvPath)
+          }
+        }
+      }
+
+      if (configLives.length === 0 && format === 'html') {
         logger.log('[ChannelService] Response is HTML, attempting to crawl for live source links...')
         logger.log('[ChannelService] → HTML preview:', processedConfig.substring(0, 300).replace(/[\r\n]/g, ' '))
 
@@ -1165,9 +1550,10 @@ export const ChannelService = {
           allGroups.push(...result)
           lastGroupAddTime = Date.now()
           await flushSnapshot()
-          return result
+          return getMergedResult()
         }
       }
+
 
       if (format === 'unknown') {
         logger.error('[ChannelService] Unknown content format for:', sourceUrl)
@@ -1194,8 +1580,12 @@ export const ChannelService = {
         allGroups.push(...result)
         lastGroupAddTime = Date.now()
         await flushSnapshot()
-        return result
+        return getMergedResult()
       }
+    }
+
+    if (livesGroupsRef) {
+      livesGroupsRef.value = configLives
     }
 
     logger.log('[ChannelService] Found', configLives.length, 'source groups:',
@@ -1203,20 +1593,18 @@ export const ChannelService = {
 
     logger.log('[ChannelService] Loop start at index: 0')
 
-    for (let li = 0; li < configLives.length; li++) {
-      completedCount = li + 1
+    const THREAD_COUNT = getOptimalThreadCount()
+    const useParallel = configLives.length > 1 && THREAD_COUNT > 1
+    const singleSourceMode = configLives.length === 1 && THREAD_COUNT > 1
+
+    const processSubLine = async (li: number): Promise<void> => {
+      if (signal?.aborted || stallAborted) return
+
       const selected = configLives[li]
 
-      if (signal?.aborted) {
-        completedCount = li
-        logger.log('[ChannelService] Aborted during source iteration, saving partial:', allGroups.length, 'groups')
-        await flushSnapshot()
-        return allGroups
-      }
-
-      if (selected.type !== '0' && selected.type !== '1') {
+      if (selected.type !== '0' && selected.type !== '1' && selected.type !== '3') {
         logger.log('[ChannelService] Source type', selected.type, 'not supported for:', selected.name)
-        continue
+        return
       }
 
       const subLineName = selected.name || ('线路' + (li + 1))
@@ -1226,11 +1614,11 @@ export const ChannelService = {
         const vodApiUrl = resolveRelativeUrl(sourceUrl, selected.url)
         if (!/^https?:\/\//i.test(vodApiUrl)) {
           logger.log('[ChannelService] Skipping VOD with non-HTTP URL:', vodApiUrl)
-          continue
+          return
         }
         if (seenUrls.has(vodApiUrl) && seenUrls.get(vodApiUrl)) {
           logger.log('[ChannelService] VOD URL already loaded, skipping:', vodApiUrl)
-          continue
+          return
         }
         addSeenUrl(vodApiUrl)
 
@@ -1251,31 +1639,58 @@ export const ChannelService = {
             e instanceof Error ? e.message : e)
         }
         if (stallAborted) {
-          if (allGroups.length > 0) {
-            completedCount = li
-            logger.log('[ChannelService] Stall detected after VOD, saving partial:', allGroups.length, 'groups')
-            await flushSnapshot()
-            return allGroups
-          }
-          logger.log('[ChannelService] Stall detected but no data yet, resetting for:', selected.name)
-          stallAborted = false
-          lastGroupAddTime = Date.now()
+          logger.log('[ChannelService] Stall detected after VOD, skipping:', selected.name)
+          return
         }
-        continue
+        return
       }
 
       const liveUrl = resolveRelativeUrl(sourceUrl, selected.url)
 
-      if (!/^https?:\/\//i.test(liveUrl)) {
-        logger.log('[ChannelService] Skipping live with non-HTTP URL:', liveUrl)
-        continue
+      // Strip URL suffix (|User-Agent=xxx, |Referer=xxx, etc.) and extract headers
+      const { cleanUrl, headers: suffixHeaders } = stripUrlSuffix(liveUrl)
+      const finalLiveUrl = sanitizeUrl(cleanUrl)
+      if (finalLiveUrl !== liveUrl) {
+        logger.log('[ChannelService] URL cleaned:', liveUrl.substring(0, 80), '->', finalLiveUrl.substring(0, 80))
       }
 
-      if (seenUrls.has(liveUrl) && seenUrls.get(liveUrl)) {
-        logger.log('[ChannelService] URL already loaded, skipping duplicate:', liveUrl)
-        continue
+      if (!/^https?:\/\//i.test(finalLiveUrl)) {
+        logger.log('[ChannelService] Skipping live with non-HTTP URL:', finalLiveUrl)
+        return
       }
-      addSeenUrl(liveUrl)
+
+      if (seenUrls.has(finalLiveUrl) && seenUrls.get(finalLiveUrl)) {
+        logger.log('[ChannelService] URL already loaded, skipping duplicate:', finalLiveUrl)
+        return
+      }
+      addSeenUrl(finalLiveUrl)
+
+      const processSubEntry = async (url: string, name: string, headers: Record<string, string>): Promise<void> => {
+        if (stallAborted) return
+        if (!url || !/^https?:\/\//i.test(url)) return
+        const resolved = resolveRelativeUrl(finalLiveUrl, url)
+        if (seenUrls.has(resolved) && seenUrls.get(resolved)) return
+        addSeenUrl(resolved)
+        try {
+          let nd = await fetchDataWithRetry(resolved, headers, 1, signal)
+          nd = await FindResult(nd)
+          const nf = detectContentFormat(nd)
+          if (nf === 'html') {
+            const ex = extractJsonFromHtml(nd)
+            if (ex && ex !== nd && (ex.startsWith('{') || ex.startsWith('['))) {
+              try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') nd = ex } catch (_) {}
+            }
+          }
+          const ng = parseLiveData(nd)
+          for (const g of ng) g.subLineName = name || subLineName
+          for (const g of ng) allGroups.push(g)
+          if (ng.length > 0) lastGroupAddTime = Date.now()
+          logger.log('[ChannelService] Sub-entry parsed:', name, '->', ng.length, 'groups')
+        } catch (e2: unknown) {
+          logger.log('[ChannelService] Sub-entry fetch failed:', name,
+            e2 instanceof Error ? e2.message : e2)
+        }
+      }
 
       try {
         let liveData: string | null = null
@@ -1288,9 +1703,10 @@ export const ChannelService = {
           const { invokeSpiderLive, invokeSpiderHome } = await import('./SpiderService')
           const spiderKey = 'sp_' + (spiderCodeUrl + (selected.spiderExt || '')).replace(/[^a-zA-Z0-9]/g, '_').substring(0, 64)
 
+          const mergedSpiderHeaders = { ...suffixHeaders, ...selected.header }
           const [spiderResult, spiderHomeResult] = await Promise.allSettled([
-            invokeSpiderLive(spiderKey, spiderCodeUrl, selected.spiderExt || '', liveUrl, selected.header),
-            invokeSpiderHome(spiderKey, spiderCodeUrl, selected.spiderExt || '', false, selected.header),
+            invokeSpiderLive(spiderKey, spiderCodeUrl, selected.spiderExt || '', finalLiveUrl, mergedSpiderHeaders),
+            invokeSpiderHome(spiderKey, spiderCodeUrl, selected.spiderExt || '', false, mergedSpiderHeaders),
           ])
 
           if (spiderResult.status === 'fulfilled' && spiderResult.value) {
@@ -1323,16 +1739,16 @@ export const ChannelService = {
         }
 
         if (!liveData) {
-          logger.log('[ChannelService] Fetching live data:', liveUrl)
-          const headers: Record<string, string> = { ...selected.header }
-          liveData = await fetchDataWithRetry(liveUrl, headers, 1, signal)
+          logger.log('[ChannelService] Fetching live data:', finalLiveUrl)
+          const headers: Record<string, string> = { ...suffixHeaders, ...selected.header }
+          liveData = await fetchDataWithRetry(finalLiveUrl, headers, 1, signal)
         }
 
         liveData = await FindResult(liveData)
 
         if (isHttpErrorResponse(liveData)) {
           logger.log('[ChannelService] HTTP error response detected for', selected.name, 'skipping, preview:', liveData.substring(0, 80))
-          continue
+          return
         }
 
         const liveFormat = detectContentFormat(liveData)
@@ -1349,11 +1765,11 @@ export const ChannelService = {
               }
             } catch (_) {
               logger.log('[ChannelService] Live data returned HTML for', selected.name, 'trying next...')
-              continue
+              return
             }
           } else {
             logger.log('[ChannelService] Live data returned HTML for', selected.name, 'trying next...')
-            continue
+            return
           }
         }
 
@@ -1368,48 +1784,74 @@ export const ChannelService = {
                 item && typeof item === 'object' && typeof item.name === 'string' && typeof item.url === 'string')
               if (hasNameUrl && !arr.some((item: any) => item.group || item.channels)) {
                 logger.log('[ChannelService] Detected TVLive name/url array format with', arr.length, 'entries')
-                for (const entry of arr) {
-                  const entryName = safeStr(entry.name, '')
-                  let entryUrl = stripBackticks(safeStr(entry.url, ''))
-                  if (entryUrl.includes('&&&')) {
-                    const parts = entryUrl.split('&&&')
-                    entryUrl = parts[0].trim()
-                    logger.log('[ChannelService] TVLive &&& split:', entryName, '->', entryUrl)
-                  }
-                  if (!entryUrl || !/^https?:\/\//i.test(entryUrl)) {
-                    logger.log('[ChannelService] TVLive entry skipped (placeholder/invalid):', entryName)
-                    continue
-                  }
-                  const resolvedEntryUrl = resolveRelativeUrl(liveUrl, entryUrl)
-                  if (seenUrls.has(resolvedEntryUrl) && seenUrls.get(resolvedEntryUrl)) {
-                    logger.log('[ChannelService] TVLive entry URL already seen:', entryName)
-                    continue
-                  }
-                  addSeenUrl(resolvedEntryUrl)
-                  try {
-                    let nd = await fetchDataWithRetry(resolvedEntryUrl, {}, 1, signal)
-                    nd = await FindResult(nd)
-                    const nf = detectContentFormat(nd)
-                    if (nf === 'html') {
-                      const ex = extractJsonFromHtml(nd)
-                      if (ex && ex !== nd && (ex.startsWith('{') || ex.startsWith('['))) {
-                        try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') nd = ex } catch (_) {}
-                      }
+                if (singleSourceMode) {
+                  const tvLiveTaskEntries: Array<{ url: string; name: string }> = []
+                  for (const entry of arr) {
+                    const entryName = safeStr(entry.name, '')
+                    let entryUrl = stripBackticks(safeStr(entry.url, ''))
+                    if (entryUrl.includes('&&&')) {
+                      const parts = entryUrl.split('&&&')
+                      entryUrl = parts[0].trim()
+                      logger.log('[ChannelService] TVLive &&& split:', entryName, '->', entryUrl)
                     }
-                    const ng = parseLiveData(nd)
-                    for (const g of ng) { g.subLineName = entryName || subLineName; allGroups.push(g) }
-                    if (ng.length > 0) lastGroupAddTime = Date.now()
-                    logger.log('[ChannelService] TVLive entry parsed:', entryName, '->', ng.length, 'groups,',
-                      ng.reduce((s, g) => s + g.liveChannels.length, 0), 'channels')
-                  } catch (e2: unknown) {
-                    logger.log('[ChannelService] TVLive entry fetch failed:', entryName,
-                      e2 instanceof Error ? e2.message : e2)
+                    if (!entryUrl || !/^https?:\/\//i.test(entryUrl)) {
+                      logger.log('[ChannelService] TVLive entry skipped (placeholder/invalid):', entryName)
+                      continue
+                    }
+                    tvLiveTaskEntries.push({ url: entryUrl, name: entryName })
+                  }
+                  if (tvLiveTaskEntries.length > 0) {
+                    logger.log('[ChannelService] TVLive parallel:', tvLiveTaskEntries.length, 'entries, threads=', THREAD_COUNT)
+                    const tvLiveTasks = tvLiveTaskEntries.map(() => (idx: number) =>
+                      processSubEntry(tvLiveTaskEntries[idx].url, tvLiveTaskEntries[idx].name, {}))
+                    await runParallel(tvLiveTasks, THREAD_COUNT, signal, RATE_LIMIT_MS)
+                  }
+                } else {
+                  for (const entry of arr) {
+                    const entryName = safeStr(entry.name, '')
+                    let entryUrl = stripBackticks(safeStr(entry.url, ''))
+                    if (entryUrl.includes('&&&')) {
+                      const parts = entryUrl.split('&&&')
+                      entryUrl = parts[0].trim()
+                      logger.log('[ChannelService] TVLive &&& split:', entryName, '->', entryUrl)
+                    }
+                    if (!entryUrl || !/^https?:\/\//i.test(entryUrl)) {
+                      logger.log('[ChannelService] TVLive entry skipped (placeholder/invalid):', entryName)
+                      continue
+                    }
+                    const resolvedEntryUrl = resolveRelativeUrl(finalLiveUrl, entryUrl)
+                    if (seenUrls.has(resolvedEntryUrl) && seenUrls.get(resolvedEntryUrl)) {
+                      logger.log('[ChannelService] TVLive entry URL already seen:', entryName)
+                      continue
+                    }
+                    addSeenUrl(resolvedEntryUrl)
+                    try {
+                      let nd = await fetchDataWithRetry(resolvedEntryUrl, {}, 1, signal)
+                      nd = await FindResult(nd)
+                      const nf = detectContentFormat(nd)
+                      if (nf === 'html') {
+                        const ex = extractJsonFromHtml(nd)
+                        if (ex && ex !== nd && (ex.startsWith('{') || ex.startsWith('['))) {
+                          try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') nd = ex } catch (_) {}
+                        }
+                      }
+                      const ng = parseLiveData(nd)
+                      for (const g of ng) { g.subLineName = entryName || subLineName; allGroups.push(g) }
+                      if (ng.length > 0) lastGroupAddTime = Date.now()
+                      logger.log('[ChannelService] TVLive entry parsed:', entryName, '->', ng.length, 'groups,',
+                        ng.reduce((s, g) => s + g.liveChannels.length, 0), 'channels')
+                    } catch (e2: unknown) {
+                      logger.log('[ChannelService] TVLive entry fetch failed:', entryName,
+                        e2 instanceof Error ? e2.message : e2)
+                    }
                   }
                 }
-                continue
+                return
               }
             }
-          } catch (_) {}
+          } catch (_) {
+            logger.debug('[ChannelService] Nested config extraction failed for:', subLineName)
+          }
         }
 
         let groups = parseLiveData(liveData)
@@ -1422,28 +1864,42 @@ export const ChannelService = {
             const hasSites = liveJson.sites && Array.isArray(liveJson.sites) && liveJson.sites.length > 0
             if (hasLives || hasUrls || hasSites) {
               const nestedLives = extractLivesGroups(liveData)
-              for (const nestedLive of nestedLives) {
-                if (nestedLive.type !== '0' && nestedLive.type !== '1') continue
-                const nestedUrl = resolveRelativeUrl(liveUrl, nestedLive.url)
-                if (seenUrls.has(nestedUrl) && seenUrls.get(nestedUrl)) continue
-                addSeenUrl(nestedUrl)
-                try {
-                  const h = { ...nestedLive.header }
-                  let nd = await fetchDataWithRetry(nestedUrl, h, 1, signal)
-                  nd = await FindResult(nd)
-                  const nf = detectContentFormat(nd)
-                  if (nf === 'html') {
-                    const ex = extractJsonFromHtml(nd)
-                    if (ex && ex !== nd && (ex.startsWith('{') || ex.startsWith('['))) {
-                      try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') nd = ex } catch (_) {}
+              if (singleSourceMode && nestedLives.length > 0) {
+                const nestedTaskEntries: Array<{ url: string; name: string; headers: Record<string, string> }> = []
+                for (const nestedLive of nestedLives) {
+                  if (nestedLive.type !== '0' && nestedLive.type !== '1' && nestedLive.type !== '3') continue
+                  nestedTaskEntries.push({ url: nestedLive.url, name: nestedLive.name || subLineName, headers: { ...nestedLive.header } })
+                }
+                if (nestedTaskEntries.length > 0) {
+                  logger.log('[ChannelService] Nested lives parallel:', nestedTaskEntries.length, 'entries, threads=', THREAD_COUNT)
+                  const nestedTasks = nestedTaskEntries.map(() => (idx: number) =>
+                    processSubEntry(nestedTaskEntries[idx].url, nestedTaskEntries[idx].name, nestedTaskEntries[idx].headers))
+                  await runParallel(nestedTasks, THREAD_COUNT, signal, RATE_LIMIT_MS)
+                }
+              } else {
+                for (const nestedLive of nestedLives) {
+                  if (nestedLive.type !== '0' && nestedLive.type !== '1' && nestedLive.type !== '3') continue
+                  const nestedUrl = resolveRelativeUrl(finalLiveUrl, nestedLive.url)
+                  if (seenUrls.has(nestedUrl) && seenUrls.get(nestedUrl)) continue
+                  addSeenUrl(nestedUrl)
+                  try {
+                    const h = { ...nestedLive.header }
+                    let nd = await fetchDataWithRetry(nestedUrl, h, 1, signal)
+                    nd = await FindResult(nd)
+                    const nf = detectContentFormat(nd)
+                    if (nf === 'html') {
+                      const ex = extractJsonFromHtml(nd)
+                      if (ex && ex !== nd && (ex.startsWith('{') || ex.startsWith('['))) {
+                        try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') nd = ex } catch (_) {}
+                      }
                     }
+                    const ng = parseLiveData(nd)
+                    for (const g of ng) g.subLineName = nestedLive.name || subLineName
+                    for (const g of ng) allGroups.push(g)
+                    if (ng.length > 0) lastGroupAddTime = Date.now()
+                  } catch (_) {
+                    logger.log('[ChannelService] Nested sub-line failed:', nestedLive.name)
                   }
-                  const ng = parseLiveData(nd)
-                  for (const g of ng) g.subLineName = nestedLive.name || subLineName
-                  for (const g of ng) allGroups.push(g)
-                  if (ng.length > 0) lastGroupAddTime = Date.now()
-                } catch (_) {
-                  logger.log('[ChannelService] Nested sub-line failed:', nestedLive.name)
                 }
               }
             }
@@ -1464,18 +1920,128 @@ export const ChannelService = {
         logger.log('[ChannelService] Live data fetch failed for', selected.name,
           e instanceof Error ? e.message : e, 'trying next...')
         if (stallAborted) {
-          if (allGroups.length > 0) {
-            completedCount = li
-            logger.log('[ChannelService] Stall detected after live fetch failure, saving partial:', allGroups.length, 'groups')
-            await flushSnapshot()
-            return allGroups
-          }
-          logger.log('[ChannelService] Stall detected but no data yet, resetting for:', selected.name)
-          stallAborted = false
-          lastGroupAddTime = Date.now()
+          logger.log('[ChannelService] Stall detected, skipping retries for:', selected.name)
+          return
         }
-        continue
+        // --- Per-sub-line retry ---
+        let subRetryOk = false
+        const SUBLINE_RETRIES = 2
+        for (let sr = 0; sr < SUBLINE_RETRIES && !subRetryOk; sr++) {
+          if (signal?.aborted) break
+          if (sr > 0) {
+            await new Promise<void>(r => {
+              const t = setTimeout(r, 2000 * Math.pow(2, sr - 1))
+              if (signal) signal.addEventListener('abort', () => { clearTimeout(t); r() }, { once: true })
+            })
+            if (signal?.aborted) break
+          }
+          try {
+            const hdrs: Record<string, string> = { ...suffixHeaders, ...selected.header }
+            let rd = await fetchDataWithRetry(finalLiveUrl, hdrs, 1, signal)
+            rd = await FindResult(rd)
+            if (isHttpErrorResponse(rd)) break
+            const rf = detectContentFormat(rd)
+            if (rf === 'html') {
+              const ex = extractJsonFromHtml(rd)
+              if (ex && ex !== rd && (ex.startsWith('{') || ex.startsWith('['))) {
+                try { const t = JSON.parse(stripJsonComments(ex.trim())); if (t && typeof t === 'object') rd = ex } catch (_) {}
+              }
+              if (detectContentFormat(rd) === 'html') break
+            }
+            let rg = parseLiveData(rd)
+            if (rg.length === 0 && rf === 'json') {
+              try {
+                const rj = JSON.parse(stripJsonComments(rd.trim()))
+                if (Array.isArray(rj.lives) || Array.isArray(rj.urls) || Array.isArray(rj.sites)) {
+                  const retryNestedLives = extractLivesGroups(rd)
+                  if (singleSourceMode && retryNestedLives.length > 0) {
+                    const retryTaskEntries: Array<{ url: string; name: string; headers: Record<string, string> }> = []
+                    for (const nl of retryNestedLives) {
+                      if (nl.type !== '0' && nl.type !== '1' && nl.type !== '3') continue
+                      const nu = resolveRelativeUrl(finalLiveUrl, nl.url)
+                      if (seenUrls.has(nu)) continue
+                      addSeenUrl(nu)
+                      retryTaskEntries.push({ url: nu, name: nl.name || subLineName, headers: { ...nl.header } })
+                    }
+                    if (retryTaskEntries.length > 0) {
+                      logger.log('[ChannelService] Retry nested lives parallel:', retryTaskEntries.length, 'entries, threads=', THREAD_COUNT)
+                      const retryTasks = retryTaskEntries.map(() => (idx: number) =>
+                        processSubEntry(retryTaskEntries[idx].url, retryTaskEntries[idx].name, retryTaskEntries[idx].headers))
+                      await runParallel(retryTasks, THREAD_COUNT, signal, RATE_LIMIT_MS)
+                    }
+                  } else {
+                    for (const nl of retryNestedLives) {
+                      if (nl.type !== '0' && nl.type !== '1' && nl.type !== '3') continue
+                      const nu = resolveRelativeUrl(finalLiveUrl, nl.url)
+                      if (seenUrls.has(nu)) continue
+                      addSeenUrl(nu)
+                      try {
+                        let nd = await fetchDataWithRetry(nu, { ...nl.header }, 1, signal)
+                        nd = await FindResult(nd)
+                        const nf2 = detectContentFormat(nd)
+                        if (nf2 === 'html') {
+                          const ex2 = extractJsonFromHtml(nd)
+                          if (ex2 && ex2 !== nd && (ex2.startsWith('{') || ex2.startsWith('['))) {
+                            try { const t2 = JSON.parse(stripJsonComments(ex2.trim())); if (t2 && typeof t2 === 'object') nd = ex2 } catch (_) {}
+                          }
+                        }
+                        const ng2 = parseLiveData(nd)
+                        for (const g2 of ng2) g2.subLineName = nl.name || subLineName
+                        for (const g2 of ng2) allGroups.push(g2)
+                        if (ng2.length > 0) lastGroupAddTime = Date.now()
+                      } catch (_) {
+                        logger.debug('[ChannelService] Retry nested sub-line failed:', nl.name)
+                      }
+                    }
+                  }
+                }
+              } catch (_) {
+              logger.debug('[ChannelService] Retry JSON parse failed for:', subLineName)
+            }
+            for (const g of rg) g.subLineName = subLineName
+            if (rg.length > 0) {
+              for (const g of rg) allGroups.push(g)
+              lastGroupAddTime = Date.now()
+              subRetryOk = true
+              logger.log('[ChannelService] Sub-line retry OK:', subLineName, rg.length, 'groups')
+            }
+          }
+          } catch (_) {
+            logger.log('[ChannelService] Sub-line retry', sr + 1, 'fail:', subLineName)
+          }
+        }
+        if (!subRetryOk) return
       }
+    }
+
+    if (useParallel) {
+      logger.log('[ChannelService] Parallel mode (multi-source): threads=', THREAD_COUNT, 'sub-lines=', configLives.length)
+      const tasks = configLives.map(() => (idx: number) => processSubLine(idx))
+      await runParallel(tasks, THREAD_COUNT, signal)
+    } else if (singleSourceMode) {
+      logger.log('[ChannelService] Single-source parallel mode: threads=', THREAD_COUNT, 'processing sub-entries in parallel')
+      for (let li = 0; li < configLives.length; li++) {
+        if (stallAborted || signal?.aborted) break
+        await processSubLine(li)
+      }
+    } else {
+      logger.log('[ChannelService] Sequential mode: sub-lines=', configLives.length)
+      for (let li = 0; li < configLives.length; li++) {
+        if (stallAborted || signal?.aborted) break
+        await processSubLine(li)
+      }
+    }
+
+    if (stallAborted) {
+      if (allGroups.length > 0) {
+        completedCount = configLives.length
+        logger.log('[ChannelService] Stall detected, saving partial:', allGroups.length, 'groups')
+        await flushSnapshot()
+        return getMergedResult()
+      }
+      logger.log('[ChannelService] Stall detected but no data, resetting')
+      stallAborted = false
+      lastGroupAddTime = Date.now()
     }
 
     if (allGroups.length === 0) {
@@ -1487,16 +2053,69 @@ export const ChannelService = {
     logger.log('[ChannelService] Total from all sub-lines:', allGroups.length, 'groups,', totalCh, 'channels')
     completedCount = configLives.length
     await flushSnapshot()
-    return filterBySourceIndex(allGroups, sourceIndex, configLives)
+    return filterBySourceIndex(getMergedResult(), sourceIndex, configLives)
     } finally {
       clearInterval(flushTimer)
       if (stallCheckTimer) clearInterval(stallCheckTimer)
     }
   },
 
+  async loadChannelsRobust(sourceUrl: string, options: {
+    sourceIndex?: number
+    livesGroupsRef?: Ref<LiveSourceGroup[]>
+    channelGroupsRef?: Ref<LiveChannelGroup[]>
+    signal?: AbortSignal
+    skipCache?: boolean
+    maxRetries?: number
+    retryDelayMs?: number
+    clearSeen?: boolean
+  } = {}): Promise<LiveChannelGroup[]> {
+    const {
+      sourceIndex = 0,
+      livesGroupsRef,
+      channelGroupsRef,
+      signal,
+      skipCache = false,
+      maxRetries = DEFAULT_MAX_RETRIES,
+      retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+      clearSeen = true,
+    } = options
+
+    if (clearSeen) {
+      this.clearSeenUrls()
+    }
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (signal?.aborted) return []
+      if (attempt > 0 && clearSeen) {
+        this.clearSeenUrls()
+      }
+      try {
+        const result = await this.loadChannels(
+          sourceUrl, sourceIndex, livesGroupsRef, channelGroupsRef, signal, skipCache
+        )
+        if (result.length > 0) return result
+        if (signal?.aborted) return []
+      } catch (e: unknown) {
+        if (signal?.aborted) return []
+        logger.log('[ChannelService] loadChannels attempt ' + (attempt + 1) + ' failed:',
+          e instanceof Error ? e.message : e)
+      }
+      if (attempt < maxRetries && !signal?.aborted) {
+        const delay = retryDelayMs * Math.pow(2, attempt)
+        logger.log('[ChannelService] Retrying in ' + delay + 'ms (' + (attempt + 1) + '/' + maxRetries + '):', sourceUrl)
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, delay)
+          if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+        })
+      }
+    }
+    logger.log('[ChannelService] All ' + (maxRetries + 1) + ' attempts exhausted for:', sourceUrl)
+    return []
+  },
+
   clearSeenUrls(): void {
-    seenUrls.clear()
-    seenUrlInsertOrder = []
+    // No-op: seenUrls is now per-call local state in loadChannels()
   },
 
   async clearCache(url?: string): Promise<void> {
@@ -1506,8 +2125,6 @@ export const ChannelService = {
       if (hasChannelCacheAPI()) {
         try { await window.electronAPI!.clearChannelCache() } catch (_) {}
       }
-      seenUrls.clear()
-      seenUrlInsertOrder = []
     }
   },
 }

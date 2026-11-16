@@ -41,6 +41,90 @@ function getLocalIpAddresses() {
   return results
 }
 
+// 网卡虚拟化特征：这些网卡不是物理局域网网卡，投屏时不应优先选用其 IP
+const VIRTUAL_NIC_PATTERN = /(vmware|virtualbox|vbox|hyper-v|vEthernet|vethernet|docker|wsl|mumu|memu|nox|ldplayer|bluestacks|tap|tun|loopback|蓝牙|bluetooth|radmin|hamachi|zerotier|tailscale)/i
+
+function getLocalIpDetails() {
+  const interfaces = os.networkInterfaces()
+  const results = []
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && iface.address !== '127.0.0.1') {
+        results.push({
+          address: iface.address,
+          name,
+          internal: !!iface.internal,
+          virtual: VIRTUAL_NIC_PATTERN.test(name),
+        })
+      }
+    }
+  }
+  return results
+}
+
+// 为目标设备挑选一个「PC 侧可达 IP」：
+// 1) 优先与目标同网段的物理网卡 IP；2) 其次同网段的任意 IP；3) 再退化为私有网段物理网卡 IP；4) 最后取任意 IP。
+function pickBestLanIp(deviceHost) {
+  const details = getLocalIpDetails()
+  const privateRe = [/^192\.168\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./]
+  if (deviceHost) {
+    for (const d of details) {
+      if (!d.virtual && isSameSubnet(d.address, deviceHost)) return d.address
+    }
+    for (const d of details) {
+      if (isSameSubnet(d.address, deviceHost)) return d.address
+    }
+  }
+  for (const re of privateRe) {
+    const hit = details.find(d => !d.virtual && re.test(d.address))
+    if (hit) return hit.address
+  }
+  for (const re of privateRe) {
+    const hit = details.find(d => re.test(d.address))
+    if (hit) return hit.address
+  }
+  return details.length > 0 ? details[0].address : '127.0.0.1'
+}
+
+// 常见模拟器 NAT 网段（QEMU/AVD/Genymotion/VirtualBox host-only 等）
+function isEmulatorNatIp(host) {
+  if (!host) return false
+  return /^10\.0\.2\./.test(host) || /^10\.0\.3\./.test(host) || /^192\.168\.56\./.test(host)
+}
+
+// 通过设备上报的厂商/型号识别模拟器（模拟器特征串，真实设备一般不会命中）
+const EMULATOR_MARKERS = [
+  'mumu', 'memu', 'nox', 'ldplayer', 'bluestacks', 'goldfish', 'ranchu',
+  'sdk_gphone', 'android sdk built for', 'emulator', 'virtualbox', 'qemu',
+  'genymotion', 'googleapis', '模拟器',
+]
+
+function isEmulatorLike(device) {
+  if (!device) return false
+  if (device.isEmulator) return true
+  const host = (device.host || '').toLowerCase()
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return true
+  if (isEmulatorNatIp(host)) return true
+  const blob = `${device.deviceModel || ''} ${device.manufacturer || ''} ${device.deviceName || ''}`.toLowerCase()
+  return EMULATOR_MARKERS.some(m => blob.includes(m))
+}
+
+// 解析投屏目标：区分「模拟器(需 adb reverse + 127.0.0.1)」与「真实设备(局域网 IP 直连)」。
+// 返回 { isEmulatorDevice, lanIp, fallbackLanIp }
+//   - 模拟器：lanIp 取 127.0.0.1（配合 adb reverse）；fallbackLanIp 为局域网 IP（reverse 失败时的兜底，仅非回环设备有）
+//   - 真实设备：lanIp 直接取局域网可达 IP，无需 reverse
+function resolveCastTarget(device) {
+  const host = device?.host || ''
+  const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1'
+  const emulatorLike = isLoopback || isEmulatorLike(device)
+  const fallbackLanIp = isLoopback ? '' : pickBestLanIp(host)
+  return {
+    isEmulatorDevice: emulatorLike,
+    lanIp: emulatorLike ? '127.0.0.1' : fallbackLanIp,
+    fallbackLanIp,
+  }
+}
+
 const GATEWAY_PROBE_TIMEOUT = 500
 const GATEWAY_PROBE_PORT = 80
 
@@ -181,29 +265,62 @@ function findAdbPath() {
     candidates.push(dir + '/adb.exe')
   }
 
-  // 5. 模拟器常见安装目录（硬编码兜底）
-  const emuCommonDirs = [
-    'C:/Program Files/Microvirt/MEmu',
-    'C:/Program Files (x86)/Microvirt/MEmu',
-    'D:/Program Files/Microvirt/MEmu',
-    'E:/Program Files/Microvirt/MEmu',
-    'C:/Microvirt/MEmu',
-    'D:/Microvirt/MEmu',
-    'E:/Microvirt/MEmu',
-    'C:/Program Files/Nox/bin',
-    'C:/Program Files (x86)/Nox/bin',
-    'D:/Program Files/Nox/bin',
-    'C:/LDPlayer/LDPlayer9',
-    'C:/LDPlayer/LDPlayer',
-    'D:/LDPlayer/LDPlayer9',
-    'D:/LDPlayer/LDPlayer',
+  // 5. 常见安卓模拟器自带 adb 的完整路径（硬编码兜底，覆盖 MuMu/MEmu/Nox/雷电/蓝叠/GameLoop/Genymotion）
+  const emuAdbCandidates = [
+    // MuMu 12（网易，默认 ADB 端口 16384，多开逐实例 +32）
+    'C:/Program Files/Netease/MuMu Player 12/shell/adb.exe',
+    'D:/Program Files/Netease/MuMu Player 12/shell/adb.exe',
+    'E:/Program Files/Netease/MuMu Player 12/shell/adb.exe',
+    'C:/Program Files/Netease/MuMuPlayer-12.0/shell/adb.exe',
+    'D:/Program Files/Netease/MuMuPlayer-12.0/shell/adb.exe',
+    // MuMu 6（旧版，端口 7555）
+    'C:/Program Files/Netease/MuMu/emulator/nemu/EmulatorShell/adb.exe',
+    'D:/Program Files/Netease/MuMu/emulator/nemu/EmulatorShell/adb.exe',
+    'C:/Program Files/Netease/MuMu/emulator/nemu/vmonitor/bin/adb_server.exe',
+    'D:/Program Files/Netease/MuMu/emulator/nemu/vmonitor/bin/adb_server.exe',
+    // MEmu / MEmu Play（逍遥，默认 21503）
+    'C:/Program Files/Microvirt/MEmu/adb.exe',
+    'C:/Program Files (x86)/Microvirt/MEmu/adb.exe',
+    'D:/Program Files/Microvirt/MEmu/adb.exe',
+    'E:/Program Files/Microvirt/MEmu/adb.exe',
+    'C:/Microvirt/MEmu/adb.exe',
+    'D:/Microvirt/MEmu/adb.exe',
+    'E:/Microvirt/MEmu/adb.exe',
+    // NoxPlayer（夜神，默认 62001）
+    'C:/Program Files/Nox/bin/adb.exe',
+    'C:/Program Files/Nox/bin/nox_adb.exe',
+    'C:/Program Files (x86)/Nox/bin/adb.exe',
+    'C:/Program Files (x86)/Nox/bin/nox_adb.exe',
+    'D:/Program Files/Nox/bin/adb.exe',
+    'D:/Program Files/Nox/bin/nox_adb.exe',
+    // LDPlayer（雷电，默认 5555）
+    'C:/LDPlayer/LDPlayer9/adb.exe',
+    'C:/LDPlayer/LDPlayer/adb.exe',
+    'D:/LDPlayer/LDPlayer9/adb.exe',
+    'D:/LDPlayer/LDPlayer/adb.exe',
+    // BlueStacks（蓝叠，默认 5555，adb 名为 HD-Adb.exe）
+    'C:/Program Files/BlueStacks_nxt/HD-Adb.exe',
+    'C:/Program Files/BlueStacks/HD-Adb.exe',
+    'D:/Program Files/BlueStacks_nxt/HD-Adb.exe',
+    'D:/Program Files/BlueStacks/HD-Adb.exe',
+    // 腾讯手游助手 GameLoop
+    'C:/Program Files/Tencent/GameLoop/adb.exe',
+    'C:/Program Files (x86)/Tencent/GameLoop/adb.exe',
+    // Genymotion（随 VirtualBox 安装）
+    'C:/Program Files/Genymobile/Genymotion/tools/adb.exe',
   ]
-  for (const dir of emuCommonDirs) {
-    candidates.push(dir + '/adb.exe', dir + '/nox_adb.exe')
+  for (const p of emuAdbCandidates) {
+    candidates.push(p)
   }
 
   // 6. 模拟器进程同目录找 adb.exe（优先 ps，回退 wmic）
-  const emuNames = ['MEmu.exe', 'MEmuHeadless.exe', 'Nox.exe', 'Ld9BoxHeadless.exe', 'LdPlayer.exe']
+  const emuNames = [
+    'MEmu.exe', 'MEmuHeadless.exe',
+    'Nox.exe', 'NoxVMHandle.exe',
+    'Ld9BoxHeadless.exe', 'LdBoxHeadless.exe', 'dnplayer.exe',
+    'MuMuPlayer.exe', 'MuMuVMMHeadless.exe',
+    'HD-Player.exe', 'HD-Adb.exe',
+  ]
   for (const emuName of emuNames) {
     try {
       let emuPath = ''
@@ -310,11 +427,13 @@ async function getEmulatorDevices() {
   // 无设备时尝试自动重连已知模拟器ADB端口
   if (emulators.length === 0) {
     const AUTO_CONNECT_PORTS = [
-      11509,  // GlideX / MEmu
-      21503, 21513, 21523,  // MEmu 标准端口
-      62001, 62025,  // Nox
-      5555,  // LDPlayer / AVD
-      7555,  // Mumu
+      11509,                              // GlideX
+      21503, 21513, 21523,                // MEmu（逍遥，标准端口 / 多开 +10）
+      62001, 62025, 62026,                // Nox（夜神）
+      5555, 5554,                         // LDPlayer / AVD / BlueStacks / GameLoop / 真机无线调试
+      7555,                               // MuMu 6（旧版）
+      16384, 16416, 16448, 16480,         // MuMu 12（本体 + 多开，逐实例 +32）
+      58526,                              // Windows 安卓子系统 WSA
     ]
     for (const p of AUTO_CONNECT_PORTS) {
       try {
@@ -467,6 +586,8 @@ function pingDevice(ip, port, timeout = SCAN_TIMEOUT) {
                 isTVLive: true,
                 autoconnect: true,
                 token: token,
+                // NAT 网段的设备基本可判定为模拟器，提前标记便于后续走 adb reverse
+                isEmulator: isEmulatorNatIp(ip),
               })
             })
           } else {
@@ -869,15 +990,29 @@ async function setupAdbReverse(localPort) {
       log('INFO', `ADB反向转发已存在: 127.0.0.1:${localPort}`)
       return { success: true, serial: '(existing)' }
     }
-    // 在模拟器上建立反向转发
+    // 在所有模拟器上建立反向转发（多开时每个实例都要通，因此不提前返回）
+    let successSerial = null
     for (const em of emulators) {
       try {
         await execAdb(`-s ${em.serial} reverse tcp:${localPort} tcp:${localPort}`, 5000)
         log('INFO', `ADB反向转发已建立: ${em.serial} → PC:${localPort}`)
-        return { success: true, serial: em.serial }
+        if (!successSerial) successSerial = em.serial
       } catch (e) {
         log('DEBG', `反向转发失败 ${em.serial}: ${e.message}`)
       }
+    }
+    // 若逐实例失败，尝试默认设备（单设备场景不带 -s 可能成功）
+    if (!successSerial) {
+      try {
+        await execAdb(`reverse tcp:${localPort} tcp:${localPort}`, 5000)
+        log('INFO', `ADB反向转发已建立(默认设备): → PC:${localPort}`)
+        successSerial = '(default)'
+      } catch (e) {
+        log('DEBG', `默认设备反向转发失败: ${e.message}`)
+      }
+    }
+    if (successSerial) {
+      return { success: true, serial: successSerial }
     }
     log('WARN', '所有模拟器的反向转发均失败')
     return { success: false, error: 'All emulators failed reverse forward' }
@@ -953,4 +1088,9 @@ module.exports = {
   testAdbPath,
   setLogCallback,
   isSameSubnet,
+  getLocalIpDetails,
+  pickBestLanIp,
+  isEmulatorLike,
+  isEmulatorNatIp,
+  resolveCastTarget,
 }

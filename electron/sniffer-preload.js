@@ -124,11 +124,10 @@
         get: function() {
           return {
             brands: [
-              { brand: 'Google Chrome', version: '120' },
-              { brand: 'Not=A?Brand', version: '24' },
-              { brand: 'Chromium', version: '120' }
-            ],
-            mobile: false,
+              { brand: 'Google Chrome', version: '156' },
+              { brand: 'Not:A-Brand', version: '24' },
+              { brand: 'Chromium', version: '156' }
+            ],            mobile: false,
             platform: 'Windows',
             getHighEntropyValues: function() { return Promise.resolve({}) }
           }
@@ -142,7 +141,7 @@
   try {
     if (!navigator.appVersion || navigator.appVersion.length < 10) {
       Object.defineProperty(Navigator.prototype, 'appVersion', {
-        get: function() { return '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        get: function() { return '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36' },
         configurable: true
       })
     }

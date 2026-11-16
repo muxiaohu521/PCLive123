@@ -3,69 +3,57 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 :: ============================================================
-:: 自动检测 / 下载 Node.js
+:: 自动检测本地 Node.js（纯批处理，不联网、不下载）
 :: ============================================================
 set NODE_LOCAL=%~dp0tools\node
 
-:: 1) 先检查 PATH
+:: 1) 优先使用 E:\tools\app\node 下版本号最高的 node.exe（纯批处理，不联网）
+set "NODE_BEST="
+call :scan_node_dir "E:\tools\app\node"
+if defined NODE_BEST (
+    set "PATH=%NODE_BEST%;%PATH%"
+    goto :env_ok
+)
+
+:: 2) 其次检查 PATH
 where node >nul 2>nul
 if %errorlevel% equ 0 goto :env_ok
 
-:: 2) 检查本地 tools\node\
-if exist "%NODE_LOCAL%\node.exe" (
-    set PATH=%NODE_LOCAL%;%PATH%
+:: 3) 检查项目自带 tools\node
+call :scan_node_dir "%NODE_LOCAL%"
+if defined NODE_BEST (
+    set "PATH=%NODE_BEST%;%PATH%"
     goto :env_ok
 )
-for /d %%D in ("%NODE_LOCAL%\*") do (
-    if exist "%%D\node.exe" (
-        set NODE_LOCAL=%%D
-        set PATH=%NODE_LOCAL%;%PATH%
+
+:: 4) 搜索常见安装位置
+for %%L in (C D E F G) do (
+    if exist "%%L:\Program Files\nodejs\node.exe" (
+        set "PATH=%%L:\Program Files\nodejs;%PATH%"
+        goto :env_ok
+    )
+    if exist "%%L:\nodejs\node.exe" (
+        set "PATH=%%L:\nodejs;%PATH%"
         goto :env_ok
     )
 )
 
-:: 3) 自动下载
+:: 5) 未检测到本地 Node.js（不下载、不联网）
 echo.
 echo ========================================
-echo   Node.js 未检测到，正在自动下载...
+echo   [ERROR] 未检测到本地 Node.js！
 echo ========================================
 echo.
-powershell -ExecutionPolicy Bypass -Command ^
-    "$nDir='%NODE_LOCAL%';" ^
-    "if(-not(Test-Path $nDir)){New-Item -Force -ItemType Directory $nDir|Out-Null};" ^
-    "$url='https://nodejs.org/dist/v20.18.1/node-v20.18.1-win-x64.zip';" ^
-    "try{$idx=Invoke-RestMethod 'https://nodejs.org/download/release/index.json' -TimeoutSec 15; $lts=$idx|?{$_.lts -and $_.files -contains 'win-x64-zip'}|Select -First 1; if($lts){$url='https://nodejs.org/dist/'+$lts.version+'/node-'+$lts.version+'-win-x64.zip'}}catch{};" ^
-    "$zip=Join-Path $nDir 'node.zip';" ^
-    "Write-Host '  正在下载 Node.js (约 30MB)...';" ^
-    "$ProgressPreference='SilentlyContinue';" ^
-    "try{Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 300 -ErrorAction Stop}catch{Write-Host '[ERROR] 下载失败: 请手动安装 https://nodejs.org/' -ForegroundColor Red; exit 1};" ^
-    "Write-Host '  正在解压...';" ^
-    "Get-ChildItem $nDir -Exclude '*.zip' -ErrorAction SilentlyContinue|Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;" ^
-    "Expand-Archive -Path $zip -DestinationPath $nDir -Force; Remove-Item $zip -Force -ErrorAction SilentlyContinue;" ^
-    "$found=Get-ChildItem $nDir -Directory|?{Test-Path \"$($_.FullName)\node.exe\"}|Select -First 1;" ^
-    "if($found){Write-Host ('Node.js 已安装: '+$found.FullName) -ForegroundColor Green}elseif(Test-Path \"$nDir\node.exe\"){Write-Host ('Node.js 已安装: '+$nDir) -ForegroundColor Green}else{Write-Host '[ERROR] 未找到 node.exe' -ForegroundColor Red; exit 1}"
-if %errorlevel% neq 0 (
-    echo.
-    echo ========================================
-    echo   [ERROR] Node.js 自动下载失败！
-    echo ========================================
-    echo.
-    echo   请手动安装 Node.js (推荐 LTS):
-    echo     https://nodejs.org/
-    echo     winget install OpenJS.NodeJS.LTS
-    echo.
-    pause
-    exit /b 1
-)
-
-:: 重新定位本地 Node.js 目录
-for /d %%D in ("%NODE_LOCAL%\*") do (
-    if exist "%%D\node.exe" (
-        set NODE_LOCAL=%%D
-        set PATH=%NODE_LOCAL%;%PATH%
-    )
-)
+echo   请手动安装 Node.js (推荐 LTS):
+echo     https://nodejs.org/
+echo     winget install OpenJS.NodeJS.LTS
 echo.
+echo   或将 node.exe 放到以下任一目录:
+echo     E:\tools\app\node\node.exe
+echo     %NODE_LOCAL%\node.exe
+echo.
+pause
+exit /b 1
 
 :env_ok
 where node >nul 2>nul
@@ -91,7 +79,7 @@ if %errorlevel% neq 0 (
 if not exist "node_modules\" (
     echo 依赖未安装，正在自动安装...
     call npm install
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
         echo 安装失败！
         pause
         exit /b 1
@@ -102,3 +90,36 @@ echo Starting PCLive Development...
 echo.
 call npm run electron:dev
 pause
+exit /b 0
+
+:: ============================================================
+:: 纯批处理：扫描指定目录，返回 node.exe 所在目录（版本号最高优先）
+:: 用法: call :scan_node_dir "目录路径"
+:: 结果: 若找到，则设置 NODE_BEST 为 node.exe 所在目录
+:: ============================================================
+:scan_node_dir
+if "%~1"=="" exit /b 0
+if not exist "%~1\" exit /b 0
+set "SCAN_BEST_DIR="
+set "SCAN_BEST_SCORE=0"
+rem 遍历 node-v* 子目录，按主/次/修订版本号数值比较，取最高者
+for /f "delims=" %%D in ('dir /b /ad "%~1\node-v*" 2^>nul') do (
+    call :pick "%~1" "%%D"
+)
+if defined SCAN_BEST_DIR set "NODE_BEST=%SCAN_BEST_DIR%"
+rem 其次匹配目录下直接的 node.exe
+if exist "%~1\node.exe" if not defined NODE_BEST set "NODE_BEST=%~1"
+exit /b 0
+
+:pick
+set "_S="
+set "V=%~2"
+set "V=%V:node-v=%"
+for /f "tokens=1-3 delims=.-" %%a in ("%V%") do set /a "_S=%%a*1000000+%%b*1000+%%c" >nul
+if not defined _S exit /b 0
+set /a "_D=%_S% - %SCAN_BEST_SCORE%"
+if %_D% GTR 0 (
+    set "SCAN_BEST_SCORE=%_S%"
+    set "SCAN_BEST_DIR=%~1\%~2"
+)
+exit /b 0

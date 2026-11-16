@@ -101,7 +101,7 @@
     <div class="panel-footer">
       <div class="footer-row">
         <span class="shortcut">↑↓ 切换视频</span>
-        <span class="shortcut">Tab 关闭</span>
+        <span class="shortcut">Esc 关闭</span>
       </div>
     </div>
 

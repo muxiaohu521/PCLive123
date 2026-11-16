@@ -16,7 +16,7 @@
           class="lives-card"
           :class="{
             active: index === store.currentLivesIndex,
-            unsupported: live.type !== '0'
+            unsupported: live.type !== '0' && live.type !== '3'
           }"
           @click="onSelect(index)"
         >
@@ -37,11 +37,18 @@
               当前
             </el-tag>
             <el-tag
-              v-else-if="live.type !== '0'"
+              v-else-if="live.type === '3'"
+              type="warning"
+              size="small"
+            >
+              蜘蛛
+            </el-tag>
+            <el-tag
+              v-else-if="live.type === '1'"
               type="info"
               size="small"
             >
-              暂不支持
+              点播
             </el-tag>
             <el-tag
               v-else
@@ -77,7 +84,8 @@ const store = useAppStore()
 const livesCount = computed(() => store.livesGroups.length)
 
 function onSelect(index: number) {
-  if (store.livesGroups[index].type !== '0') return
+  const t = store.livesGroups[index].type
+  if (t !== '0' && t !== '3') return
   if (index === store.currentLivesIndex) return
   store.selectLives(index)
 }

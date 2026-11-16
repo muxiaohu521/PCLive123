@@ -83,8 +83,26 @@ function Install-NodeJs {
 
 function Get-NodeBin {
     $nodeBin = $null
-    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-    if ($nodeCmd) { $nodeBin = Split-Path $nodeCmd.Source -Parent }
+    # 优先使用 E:\tools\app\node 中版本号最高的 Node.js（优先最新版）
+    $preferRoot = "E:\tools\app\node"
+    if (Test-Path $preferRoot) {
+        $best = Get-ChildItem -LiteralPath $preferRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName "node.exe") } |
+            Sort-Object -Descending -Property @{
+                Expression = {
+                    $m = [regex]::Match($_.Name, "v(\d+)\.(\d+)\.(\d+)")
+                    if ($m.Success) { [version]($m.Groups[1].Value + "." + $m.Groups[2].Value + "." + $m.Groups[3].Value) }
+                    else { [version]"0.0.0" }
+                }
+            } |
+            Select-Object -First 1
+        if ($best) { $nodeBin = $best.FullName }
+        elseif (Test-Path (Join-Path $preferRoot "node.exe")) { $nodeBin = $preferRoot }
+    }
+    if (-not $nodeBin) {
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+        if ($nodeCmd) { $nodeBin = Split-Path $nodeCmd.Source -Parent }
+    }
     if (-not $nodeBin) {
         $localNode = Join-Path $projectRoot "tools\node"
         if (Test-Path "$localNode\node.exe") { $nodeBin = $localNode }

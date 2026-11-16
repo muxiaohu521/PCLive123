@@ -33,7 +33,32 @@ interface SpiderInstance {
   [key: string]: any
 }
 
-const spiderCache = new Map<string, SpiderInstance>()
+class LRUCache<K, V> {
+  private max: number
+  private map = new Map<K, V>()
+  constructor(max: number) { this.max = Math.max(1, max) }
+  get(key: K): V | undefined {
+    if (!this.map.has(key)) return undefined
+    const value = this.map.get(key)!
+    this.map.delete(key)
+    this.map.set(key, value)
+    return value
+  }
+  set(key: K, value: V): void {
+    if (this.map.has(key)) this.map.delete(key)
+    else if (this.map.size >= this.max) {
+      const first = this.map.keys().next().value
+      if (first !== undefined) this.map.delete(first)
+    }
+    this.map.set(key, value)
+  }
+  has(key: K): boolean { return this.map.has(key) }
+  clear(): void { this.map.clear() }
+  get size(): number { return this.map.size }
+}
+
+const SPIDER_CACHE_MAX = 32
+const spiderCache = new LRUCache<string, SpiderInstance>(SPIDER_CACHE_MAX)
 const spiderLock = new Map<string, Promise<SpiderInstance | null>>()
 
 let fetchUrlFunc: ((url: string, headers: Record<string, string>) => Promise<string>) | null = null

@@ -2,298 +2,2703 @@
   "channels": [
     {
       "name": "CCTV1 综合",
-      "url": "https://www.yangshipin.cn/tv/home",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001859"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv1/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001859",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV2 财经",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001800",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001800"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv2/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001800",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV3 综艺",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001801",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001801"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv3/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001801",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV4 中文国际",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001814",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001814"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv4/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001814",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV5 体育",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001818",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001818"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv5/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001818",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV5+ 体育赛事",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001817",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001817"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv5plus/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001817",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV6 电影",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600108442",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600108442"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv6/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600108442",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV7 国防军事",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600004092",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600004092"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv7/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600004092",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV8 电视剧",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001803",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001803"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv8/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001803",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV9 纪录",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600004078",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600004078"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctvjilu/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600004078",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV10 科教",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001805",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001805"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv10/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001805",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV11 戏曲",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001806",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001806"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv11/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001806",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV12 社会与法",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001807",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001807"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv12/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001807",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV13 新闻",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001811",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001811"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv13/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001811",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV14 少儿",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001809",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001809"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctvchild/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001809",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV15 音乐",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001815",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001815"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv15/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001815",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV16 奥林匹克",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600098637",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600098637"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv16/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600098637",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "CCTV17 农业农村",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600001810",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001810"
+        },
+        {
+          "name": "央视网网页",
+          "url": "https://tv.cctv.com/live/cctv17/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600001810",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "北京卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002309",
-      "pid": ""
-    },
-    {
-      "name": "江苏卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002521",
-      "pid": ""
-    },
-    {
-      "name": "东方卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002483",
-      "pid": ""
-    },
-    {
-      "name": "浙江卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002520",
-      "pid": ""
-    },
-    {
-      "name": "湖南卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002475",
-      "pid": ""
-    },
-    {
-      "name": "湖北卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002508",
-      "pid": ""
-    },
-    {
-      "name": "广东卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002485",
-      "pid": ""
-    },
-    {
-      "name": "广西卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002509",
-      "pid": ""
-    },
-    {
-      "name": "黑龙江卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002498",
-      "pid": ""
-    },
-    {
-      "name": "海南卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002506",
-      "pid": ""
-    },
-    {
-      "name": "重庆卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002531",
-      "pid": ""
-    },
-    {
-      "name": "深圳卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002481",
-      "pid": ""
-    },
-    {
-      "name": "四川卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002516",
-      "pid": ""
-    },
-    {
-      "name": "河南卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002525",
-      "pid": ""
-    },
-    {
-      "name": "福建东南卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002484",
-      "pid": ""
-    },
-    {
-      "name": "贵州卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002490",
-      "pid": ""
-    },
-    {
-      "name": "江西卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002503",
-      "pid": ""
-    },
-    {
-      "name": "辽宁卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002505",
-      "pid": ""
-    },
-    {
-      "name": "安徽卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002532",
-      "pid": ""
-    },
-    {
-      "name": "河北卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002493",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002309"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002309",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "天津卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600152137",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600152137"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600152137",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "重庆卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002531"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002531",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "深圳卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002481"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002481",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "香港卫视",
+      "routes": [
+        {
+          "name": "香港卫视网页",
+          "url": "https://www.hkstv.tv/live"
+        },
+        {
+          "name": "视频流解析-香港卫视",
+          "url": "https://www.hkstv.tv/live",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "澳门莲花卫视",
+      "routes": [
+        {
+          "name": "澳门莲花卫视",
+          "url": "https://www.lotustv.mo/"
+        },
+        {
+          "name": "视频流解析-莲花",
+          "url": "https://www.lotustv.mo/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "安徽卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002532"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002532",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002475"
+        },
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/2778/2778"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002475",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "金鹰卡通",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/287/287"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/287/287",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南经视",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/280/280"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/280/280",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南娱乐",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/344/344"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/344/344",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南电影",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/221/221"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/221/221",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南都市",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/346/346"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/346/346",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南电视剧",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/484/484"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/484/484",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "金鹰纪实",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/316/316"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/316/316",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南爱晚",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/261/261"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/261/261",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖南国际",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/229/229"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/229/229",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "快乐垂钓",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/218/218"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/218/218",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "长沙新闻综合",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/269/269"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/269/269",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "长沙政法",
+      "routes": [
+        {
+          "name": "芒果TV",
+          "url": "https://www.mgtv.com/z/254/254"
+        },
+        {
+          "name": "视频流解析-芒果TV",
+          "url": "https://www.mgtv.com/z/254/254",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河南卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002525"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002525",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "辽宁卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002505"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002505",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "吉林卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190405",
-      "pid": ""
-    },
-    {
-      "name": "陕西卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190400",
-      "pid": ""
-    },
-    {
-      "name": "甘肃卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190408",
-      "pid": ""
-    },
-    {
-      "name": "宁夏卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190737",
-      "pid": ""
-    },
-    {
-      "name": "内蒙古卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190401",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190405"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190405",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "云南卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190402",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190402"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190402",
+          "type": "stream"
+        }
+      ]
     },
     {
-      "name": "山西卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190407",
-      "pid": ""
+      "name": "四川卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002516"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002516",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "甘肃卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190408"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190408",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "青海卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190406",
-      "pid": ""
-    },
-    {
-      "name": "西藏卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600190403",
-      "pid": ""
-    },
-    {
-      "name": "新疆卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600152138",
-      "pid": ""
-    },
-    {
-      "name": "中国教育电视台1频道",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600171827",
-      "pid": ""
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190406"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190406",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东卫视",
-      "url": "https://www.yangshipin.cn/tv/home?pid=600002513",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/sdtv/"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002513"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/sdtv/",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东齐鲁频道",
-      "url": "https://v.iqilu.com/live/qlpd/",
-      "pid": ""
-    },
-    {
-      "name": "山东体育频道",
-      "url": "https://v.iqilu.com/live/typd/",
-      "pid": ""
-    },
-    {
-      "name": "山东生活频道",
-      "url": "https://v.iqilu.com/live/shpd/",
-      "pid": ""
-    },
-    {
-      "name": "山东综艺频道",
-      "url": "https://v.iqilu.com/live/zypd/",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/qlpd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/qlpd/",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东新闻频道",
-      "url": "https://v.iqilu.com/live/ggpd/",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/ggpd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/ggpd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山东生活频道",
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/shpd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/shpd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山东综艺频道",
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/zypd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/zypd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山东体育频道",
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/typd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/typd/",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东农科频道",
-      "url": "https://v.iqilu.com/live/nkpd/",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/nkpd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/nkpd/",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东文旅频道",
-      "url": "https://v.iqilu.com/live/yspd/",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/yspd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/yspd/",
+          "type": "stream"
+        }
+      ]
     },
     {
       "name": "山东少儿频道",
-      "url": "https://v.iqilu.com/live/sepd/",
-      "pid": ""
+      "routes": [
+        {
+          "name": "齐鲁网",
+          "url": "https://v.iqilu.com/live/sepd/"
+        },
+        {
+          "name": "视频流解析-齐鲁网",
+          "url": "https://v.iqilu.com/live/sepd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "青岛新闻综合",
+      "routes": [
+        {
+          "name": "青岛网络电视台",
+          "url": "https://www.qtv.com.cn/live/tv/"
+        },
+        {
+          "name": "视频流解析-青岛",
+          "url": "https://www.qtv.com.cn/live/tv/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "青岛生活服务",
+      "routes": [
+        {
+          "name": "青岛网络电视台",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv2.shtml"
+        },
+        {
+          "name": "视频流解析-青岛",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv2.shtml",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "青岛文旅体育",
+      "routes": [
+        {
+          "name": "青岛网络电视台",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv3.shtml"
+        },
+        {
+          "name": "视频流解析-青岛",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv3.shtml",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "青岛教育",
+      "routes": [
+        {
+          "name": "青岛网络电视台",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv6.shtml"
+        },
+        {
+          "name": "视频流解析-青岛",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv6.shtml",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "青岛都市",
+      "routes": [
+        {
+          "name": "青岛网络电视台",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv4.shtml"
+        },
+        {
+          "name": "视频流解析-青岛",
+          "url": "https://www.qtv.com.cn/live/tv/tv_qtv4.shtml",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "浙江卫视",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/101"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002520"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/101",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "科教影视",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/104"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/104",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "钱江都市",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/102"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/102",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "经济生活",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/103"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/103",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "浙江新闻",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/107"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/107",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "浙江少儿",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/108"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/108",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "浙江国际",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/110"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/110",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "民生休闲",
+      "routes": [
+        {
+          "name": "中国蓝TV",
+          "url": "https://www.cztv.com/liveTV/106"
+        },
+        {
+          "name": "视频流解析-中国蓝",
+          "url": "https://www.cztv.com/liveTV/106",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏卫视",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=660"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002521"
+        },
+        {
+          "name": "荔枝网4K",
+          "url": "https://live.jstv.com/?channelId=659"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=660",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏综艺",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=663"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=663",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏影视",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=664"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=664",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏体育",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=665"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=665",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏教育",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=666"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=666",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "优漫卡通",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=667"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=667",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏新闻",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=668"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=668",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏城市",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=669"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=669",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江苏国际",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://live.jstv.com/?channelId=671"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://live.jstv.com/?channelId=671",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "东方卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002483"
+        },
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002483",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "上海新闻综合",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=2"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=2",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "魔都眼",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=11"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=11",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "第一财经",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=5"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=5",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "新纪实",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=12"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=12",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "五星体育",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=10"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=10",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "上海都市",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=4"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=4",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "哈哈炫动",
+      "routes": [
+        {
+          "name": "看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=9"
+        },
+        {
+          "name": "视频流解析-看看新闻",
+          "url": "https://live.kankanews.com/huikan/?id=9",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山西卫视",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#q8RVWgs"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190407"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#q8RVWgs",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黄河电视台",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#lce1mC4"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#lce1mC4",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山西经济与科技",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#4j01KWX"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#4j01KWX",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山西影视",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#Md571Kv"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#Md571Kv",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山西社会与法治",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#p4y5do9"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#p4y5do9",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "山西文体生活",
+      "routes": [
+        {
+          "name": "山西网络广播电视台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#agmpyEk"
+        },
+        {
+          "name": "视频流解析-山西台",
+          "url": "https://www.sxrtv.com/tv/index.shtml#agmpyEk",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西卫视",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/star"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190400"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/star",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西农林",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/nl"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/nl",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西移动电视",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/11"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/11",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西体育休闲",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/7"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/7",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西新闻资讯",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/1"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/1",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西都市青春",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/2"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/2",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西银龄",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/3"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/3",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "陕西秦腔",
+      "routes": [
+        {
+          "name": "陕西网络广播电视台",
+          "url": "http://live.snrtv.com/5"
+        },
+        {
+          "name": "视频流解析-陕西台",
+          "url": "http://live.snrtv.com/5",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广西卫视",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_e7a7ab7df9fe11e88bcfe41f13b60c62.html"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002509"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_e7a7ab7df9fe11e88bcfe41f13b60c62.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广西综艺旅游",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_f3335975f9fe11e88bcfe41f13b60c62.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_f3335975f9fe11e88bcfe41f13b60c62.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广西都市",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_fdbaf085f9fe11e88bcfe41f13b60c62.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_fdbaf085f9fe11e88bcfe41f13b60c62.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广西影视",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_5e923d82058e11e9ba67e41f13b60c62.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_5e923d82058e11e9ba67e41f13b60c62.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广西新闻",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_9dfd8600075811e9ba67e41f13b60c62.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_9dfd8600075811e9ba67e41f13b60c62.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "CETV1",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_ffa6b6e1b32b4a16a73eb3ef66f8bfc7.html"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600171827"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_ffa6b6e1b32b4a16a73eb3ef66f8bfc7.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "CETV2",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_80d0ffb42c114eaf9663708629ff0a3e.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_80d0ffb42c114eaf9663708629ff0a3e.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "CETV4",
+      "routes": [
+        {
+          "name": "广西网络广播电视台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_67eace939278435bb4bca90800fb4225.html"
+        },
+        {
+          "name": "视频流解析-广西台",
+          "url": "https://tv.gxtv.cn/channel/channelivePlay_67eace939278435bb4bca90800fb4225.html",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "宁夏卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190737"
+        },
+        {
+          "name": "宁夏网络广播电视台",
+          "url": "https://www.nxtv.com.cn/19/19kds/dsp/"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190737",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002508"
+        },
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/431"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/431",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北经视",
+      "routes": [
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/432"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/432",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北综合",
+      "routes": [
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/433"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/433",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北影视",
+      "routes": [
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/435"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/435",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北教育",
+      "routes": [
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/437"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/437",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "湖北垄上",
+      "routes": [
+        {
+          "name": "长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/438"
+        },
+        {
+          "name": "视频流解析-长江云",
+          "url": "https://news.hbtv.com.cn/app/tv/438",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002485"
+        },
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/43"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/43",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东珠江",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/44"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/44",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东新闻",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/45"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/45",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东民生",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/48"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/48",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东体育",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/47"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/47",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "大湾区卫视",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/51"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/51",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "大湾区卫视海外版",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/46"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/46",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东影视",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/53"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/53",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东少儿",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/54"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/54",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "嘉佳卡通",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/66"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/66",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "南方购物",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/42"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/42",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "岭南戏曲",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/15"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/15",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东移动",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/74"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/74",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东台经典剧",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/100"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/100",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东纪录片",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/94"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/94",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "广东健康",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/99"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/99",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "GRTN生活",
+      "routes": [
+        {
+          "name": "荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/102"
+        },
+        {
+          "name": "视频流解析-荔枝网",
+          "url": "https://gdtv.cn/tvChannelDetail/102",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西卫视",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv1"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002503"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv1",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西都市",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv2"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv2",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西经济生活",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv3"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv3",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西公共农业",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv5"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv5",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西少儿",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv6"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv6",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西新闻",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv7"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv7",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西移动电视",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/jxtv8"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/jxtv8",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "江西陶瓷",
+      "routes": [
+        {
+          "name": "江西网络广播电视台",
+          "url": "https://www.jxntv.cn/live/#/tcpd"
+        },
+        {
+          "name": "视频流解析-江西台",
+          "url": "https://www.jxntv.cn/live/#/tcpd",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州卫视",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch01"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002490"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch01",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州公共",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch02"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch02",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州影视文艺",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch03"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch03",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州大众生活",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch04"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch04",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州生态乡村",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch05"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch05",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "贵州科教健康",
+      "routes": [
+        {
+          "name": "贵州网络广播电视台",
+          "url": "https://gzstv.com/tv/ch06"
+        },
+        {
+          "name": "视频流解析-贵州台",
+          "url": "https://gzstv.com/tv/ch06",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "东南卫视",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/setv/"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002484"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/dnpd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "福建综合",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/zhpd/"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/zhpd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "福建新闻",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/xwpd/"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/xwpd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "福建文旅体育",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/dspd/"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/dspd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "福建少儿",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/child/"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/child/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海峡卫视",
+      "routes": [
+        {
+          "name": "福建网络广播电视台",
+          "url": "https://live.fjtv.net/haixiapd/"
+        },
+        {
+          "name": "视频流解析-福建台",
+          "url": "https://live.fjtv.net/haixiapd/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古卫视",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=3621481"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190401"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=3621481",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古蒙古语卫视",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2315"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2315",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古新闻综合",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2316"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2316",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古经济生活",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2317"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2317",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古少儿",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2318"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2318",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古文体娱乐",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2319"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2319",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古农牧",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2320"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2320",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "内蒙古蒙古语文化",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2321"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2321",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "呼和浩特",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2331"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2331",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "包头",
+      "routes": [
+        {
+          "name": "内蒙古网络广播电视台",
+          "url": "https://www.nmtv.cn/liveTv?id=2358"
+        },
+        {
+          "name": "视频流解析-内蒙古台",
+          "url": "https://www.nmtv.cn/liveTv?id=2358",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "西藏卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190403"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600190403",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "新疆卫视",
+      "routes": [
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600152138"
+        },
+        {
+          "name": "视频流解析-央视频",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600152138",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江卫视",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljws/"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002498"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljws/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江文体",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljwt/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljwt/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江农业科教",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljnykj/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljnykj/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江新闻法制",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/heilongjiang/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/heilongjiang/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江少儿",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljse/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljse/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江都市",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljds/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljds/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "黑龙江影视",
+      "routes": [
+        {
+          "name": "东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljys/"
+        },
+        {
+          "name": "视频流解析-东北网",
+          "url": "https://www.dbw.cn/zhibodan/zhibo_dan/hljys/",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南卫视",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=13&referPage=home"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002506"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=13&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南自贸",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=1&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=1&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南新闻",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=3&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=3&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南社会与法",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=4&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=4&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南文旅",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=6&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=6&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "海南少儿",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=7&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=7&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "三沙卫视",
+      "routes": [
+        {
+          "name": "海南网络广播电视台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=5&referPage=home"
+        },
+        {
+          "name": "视频流解析-海南台",
+          "url": "https://www.hnntv.cn/live.html?playType=livePlay&channelId=5&referPage=home",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北卫视",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=0"
+        },
+        {
+          "name": "央视频网页",
+          "url": "https://www.yangshipin.cn/tv/home?pid=600002493"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=0",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北经济生活",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=1"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=1",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北都市",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=2"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=2",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北文旅体育",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=3"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=3",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北少儿科教",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=4"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=4",
+          "type": "stream"
+        }
+      ]
+    },
+    {
+      "name": "河北三农频道",
+      "routes": [
+        {
+          "name": "河北网络广播电视台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=5"
+        },
+        {
+          "name": "视频流解析-河北台",
+          "url": "https://www.hebrts.cn/19/19js/st/xdszb/index.shtml?index=5",
+          "type": "stream"
+        }
+      ]
     }
   ]
 }

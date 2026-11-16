@@ -1,6 +1,7 @@
 // ============ 广告过滤模块 ============
 // 参考 TVBox M3u8.java / AdBlocker.java / VideoParseRuler.java 实现
 import sharedRules from '@shared/ad-filter-rules.json'
+import { logger } from '@/utils/logger'
 
 // ---- 内置广告域名黑名单（来自共享规则文件 ad-filter-rules.json） ----
 const DEFAULT_AD_HOSTS: string[] = sharedRules.DEFAULT_AD_HOSTS
@@ -44,6 +45,7 @@ export function isAdHost(url: string): boolean {
 }
 
 export function addAdHosts(hosts: string[]): void {
+  let added = 0
   for (const h of hosts) {
     if (!h) continue
     if (removedBuiltinHosts.includes(h)) {
@@ -52,8 +54,10 @@ export function addAdHosts(hosts: string[]): void {
     }
     if (!extraAdHosts.includes(h) && !DEFAULT_AD_HOSTS.includes(h)) {
       extraAdHosts.push(h)
+      added++
     }
   }
+  if (added > 0) logger.log('[AdFilter] added', added, 'custom ad host(s), total extra:', extraAdHosts.length)
 }
 
 export function removeAdHost(host: string): void {

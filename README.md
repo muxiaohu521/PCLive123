@@ -1,4 +1,4 @@
-# PCLive v1.2.0 - PC 直播客户端
+# PCLive v1.4.0 - PC 直播客户端
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-muxiaohu521%2FPCLive123-green.svg)](https://github.com/muxiaohu521/PCLive123)
@@ -10,9 +10,9 @@
 ## 功能特性
 
 ### 直播播放
-- 支持 **M3U8 (HLS)**、**FLV**、**MP4**、**TS**、**MKV** 等流媒体格式
-- 基于 ArtPlayer 播放器内核，集成 HLS.js 和 mpegts.js
-- **解码模式切换**：自动 / 硬解 / 软解 / FFmpeg 解码，适配不同硬件环境
+- 支持 **M3U8 (HLS)**、**FLV**、**MP4**、**TS**、**MKV**、**DASH (.mpd)**、**WebTorrent (磁力/.torrent)** 等流媒体格式
+- 基于 ArtPlayer 播放器内核 + 可插拔播放引擎体系（`player-plugins`），集成 HLS.js、mpegts.js、dashjs、WebTorrent、原生 video、纯音频六类引擎
+- **解码模式切换**：自动 / 硬解 / 软解 / MPV / VLC / FFmpeg 解码，适配不同硬件环境
 - 频道线路切换（多线路自动切换，播放失败自动切下一个线路）
 - **本地直播源模块**：CCTV+卫视频道，每频道多线路，支持线路独立编辑/增删
 - 音量控制、静音、暂停/播放
@@ -24,11 +24,15 @@
 - 支持 **MP3、M4A、AAC、WAV、FLAC、OPUS、WMA** 等音频格式（纯音频播放模式）
 - 三种播放模式：**单曲循环** / **顺序播放** / **随机播放**
 
+### 外部播放器（MPV / VLC）
+- 支持将当前播放流推送到 **MPV** / **VLC** 独立窗口播放
+- 在「设置」中配置 MPV / VLC 可执行文件路径，并支持一键检测可用性
+- 作为解码模式之一：自动模式下软解失败时按 **MPV → VLC → FFmpeg** 顺序回退
+
 ### 官网直播源（网页源）
-- 内置 **央视频**（yangshipin.cn）频道列表，覆盖 CCTV1~17、CCTV5+、卫视频道
+- 内置大量频道列表，覆盖 CCTV1~17、卫视频道、地方频道
 - 通过 Electron BrowserWindow 加载官网页面，自动注入控制面板（`YspPlayerBar`）
-- 播放控制栏功能：**上一节目 / 下一节目**、**播放/暂停**、**画质切换**（自动/1080P/720P/480P）
-- **音量/静音控制**、**播放速度调节**（0.5x~4x）
+- 播放控制栏功能：**上一节目 / 下一节目**、**播放/暂停**
 - 支持添加、编辑、删除自定义央视频频道
 - 频道数据存储在 `data/ysp_channels.json`
 - 后台主进程 `ysp_handler.js` 负责页面渲染、DOM 分析、CDN 流地址提取
@@ -53,8 +57,13 @@
 - 投屏控制：播放、暂停、停止、音量调节
 
 ### 悬浮窗
-- 支持**画中画悬浮窗**模式，将视频以独立小窗口显示在其他应用之上
+- 支持**画中画、悬浮窗**模式，将视频以独立小窗口显示在其他应用之上
 - WebRTC 视频镜像流（`useMirrorStream`），主窗口与悬浮窗间同步
+
+### 录制与下载
+- **录屏**：从当前播放画面直录，输出 WebM，切频道/线路自动跟随录制，6 小时自动停止
+- **流下载**：HLS 按分片缓存下载后使用内置 FFmpeg 无损合并，6 小时自动停止
+- 基于统一流接口（`PlaybackStreamHub`），下载/录屏/悬浮窗/投屏/画中画按需消费同一路流
 
 ### URL 嗅探
 - 输入网页 URL 自动嗅探页面中的视频/流媒体链接
@@ -86,8 +95,8 @@
 - Base64/steganography 内容提取（FindResult 解密）
 
 ### 设置面板
-- 播放设置：默认音量、缓冲区大小、解码模式（自动/硬解/软解/FFmpeg）
-- FFmpeg 路径配置与可用性检测
+- 播放设置：默认音量、缓冲区大小、解码模式（自动/硬解/软解/MPV/VLC/FFmpeg）
+- FFmpeg / MPV / VLC 路径配置与可用性检测
 - 字幕设置：字号、颜色、背景
 - 网络设置：HTTP 代理、请求超时
 - 广告过滤规则管理
@@ -105,14 +114,15 @@
 
 | 层级 | 技术 |
 |------|------|
-| 桌面壳 | Electron 28 |
+| 桌面壳 | Electron 45 |
 | 前端框架 | Vue 3 (Composition API) + TypeScript |
 | 状态管理 | Pinia |
 | UI 组件库 | Element Plus |
-| 视频播放 | ArtPlayer + HLS.js + mpegts.js |
+| 视频播放 | ArtPlayer + 插件引擎体系（HLS.js / mpegts.js / dashjs / WebTorrent / 原生 / 音频） |
 | 构建工具 | Vite 5 |
 | 持久化存储 | LocalStorage + electron-store |
-| 流处理 | FFmpeg（可选） |
+| 流处理 | FFmpeg（内置 + 可选外置） |
+| 外部播放器 | MPV / VLC（可选） |
 | 投屏 | DLNA / UPnP |
 | WebRTC | 悬浮窗镜像流 |
 
@@ -131,6 +141,7 @@ PCLive/
 │   ├── sniffer-preload.js        # 嗅探器预加载脚本
 │   ├── m3u8Purifier.js           # M3U8 净化器（过滤无效片段）
 │   ├── ysp_handler.js            # 央视频流处理
+│   ├── ua.js                     # 浏览器 User-Agent 定义
 │   └── shared/
 │       └── ad-filter-rules.json  # 广告过滤规则
 ├── src/                          # Vue 渲染进程源码
@@ -139,34 +150,63 @@ PCLive/
 │   ├── components/               # UI 组件
 │   │   ├── TitleBar.vue          # 自定义标题栏（窗口控制、源名称显示）
 │   │   ├── VideoPlayer.vue       # 视频播放器（ArtPlayer 封装，多格式支持）
+│   │   ├── video-player/         # 播放器核心模块（引擎调度、硬解/软解、自动回退、外部播放器、FFmpeg 解码、字幕、看门狗）
 │   │   ├── ChannelList.vue       # 频道列表面板（搜索、分组切换）
 │   │   ├── SourceManager.vue     # 直播源管理面板（增删改、导入导出）
 │   │   ├── LocalChannelsList.vue # 本地直播源面板
 │   │   ├── LivesPanel.vue        # 子线路列表面板
 │   │   ├── LocalVideoList.vue    # 本地视频/音频列表
-│   │   ├── ToolsDialog.vue       # 工具对话框（连通性测试、链接嗅探）
+│   │   ├── ToolsDialog.vue       # 工具对话框（连通性测试、URL嗅探、IP查询、录屏、下载、投屏）
 │   │   ├── DlnaPanel.vue         # DLNA 投屏面板
 │   │   ├── YspPanel.vue          # 央视频面板
 │   │   ├── YspPlayerBar.vue      # 央视频播放控制栏
+│   │   ├── SyncTVPanel.vue       # TVLive 同步投屏面板
+│   │   ├── TaskStatusBar.vue     # 任务状态栏（录屏/下载等后台任务进度）
 │   │   └── SettingsPanel.vue     # 设置面板（播放、字幕、网络、广告过滤）
 │   ├── composables/              # Vue Composables
+│   │   ├── usePlaybackStream.ts  # 统一流接口应用层绑定（下载/投屏直链）
+│   │   ├── useRecorder.ts        # 主窗口直录（MediaRecorder，切频道跟随）
 │   │   ├── useMirrorStream.ts    # WebRTC 镜像流（悬浮窗视频同步）
 │   │   ├── useSubtitle.ts        # 外挂字幕处理
 │   │   └── useInputContextMenu.ts # 输入框右键菜单
+│   ├── player-plugins/           # 播放引擎插件体系（按格式调度最优引擎）
+│   │   ├── index.ts              # 插件统一入口（注册全部内置引擎）
+│   │   ├── registry.ts           # 插件注册中心（按格式查找/选择引擎）
+│   │   ├── base.ts               # 插件基类
+│   │   ├── types.ts              # 插件类型定义
+│   │   └── plugins/              # 内置引擎插件
+│   │       ├── native.plugin.ts  # 原生 video 引擎
+│   │       ├── audio.plugin.ts   # 纯音频引擎
+│   │       ├── hls.plugin.ts     # HLS 引擎（hls.js）
+│   │       ├── mpegts.plugin.ts  # FLV/TS 引擎（mpegts.js）
+│   │       ├── dash.plugin.ts    # DASH 引擎（dashjs）
+│   │       └── webtorrent.plugin.ts # BT 引擎（WebTorrent）
 │   ├── store/
 │   │   └── index.ts              # Pinia Store（全局状态、频道/线路排序、源管理）
+│   ├── tools/                    # 工具箱模块化系统（按需懒加载）
+│   │   ├── registry.ts           # 工具注册表（tab 元数据与懒加载）
+│   │   ├── types.ts              # 工具类型定义
+│   │   ├── connectivity/         # 连通性测试
+│   │   ├── sniffer/              # URL 嗅探
+│   │   ├── geoip/                # IP 查询
+│   │   ├── recording/            # 录屏
+│   │   ├── download/             # 下载
+│   │   ├── cast/                 # 投屏
+│   │   └── shared/               # 公共工具（格式化、shell、样式）
 │   ├── services/                 # 业务服务层
 │   │   ├── ChannelService.ts     # 频道服务（数据获取、解密、解析）
 │   │   ├── AudioPlayer.ts        # 音频播放器（纯音频模式）
 │   │   ├── FormatDetector.ts     # 流格式检测器
 │   │   ├── NetworkInterceptor.ts # 网络拦截器
 │   │   ├── SpiderService.ts      # AList 爬虫服务
+│   │   ├── PlaybackStreamHub.ts  # 统一流接口（下载/录屏/悬浮窗/投屏消费者调度）
 │   │   └── StreamSessionManager.ts # 流会话管理器
 │   ├── models/
 │   │   ├── LiveChannelItem.ts    # 频道/分组/源数据模型
 │   │   └── index.ts              # 模型导出
 │   ├── utils/                    # 工具函数
 │   │   ├── TxtParser.ts          # M3U/TXT/JSON 多格式解析器
+│   │   ├── ThreadPool.ts         # 线程池 / 并发控制工具
 │   │   ├── SourceFileService.ts  # 源文件导入导出服务
 │   │   ├── SourceCrawler.ts      # 直播源爬虫
 │   │   ├── AdFilter.ts           # 广告过滤器
@@ -174,6 +214,7 @@ PCLive/
 │   │   ├── SubtitleParser.ts     # 字幕解析器（SRT/ASS/VTT）
 │   │   ├── m3uConverter.ts       # M3U 格式转换器
 │   │   ├── md5.ts                # MD5 计算工具
+│   │   ├── webviewFillScreen.ts  # Webview 全屏填充工具
 │   │   └── logger.ts             # 日志工具
 │   ├── views/
 │   │   └── FloatView.vue         # 悬浮窗视图
@@ -185,11 +226,12 @@ PCLive/
 │   ├── verified_channels.json    # 本地直播源
 │   ├── sources.json              # 远程直播源配置
 │   ├── ysp_channels.json         # 央视频频道配置
-│   └── cache/                    # 原始直播源缓存
+│   ├── cache/                    # 原始直播源缓存
+│   └── ffmpeg/                   # 内置 FFmpeg（ffmpeg.exe / ffprobe.exe）
 ├── scripts/                      # 构建脚本
 │   ├── build_gui.py              # Python GUI 打包工具（Tkinter 弹窗，含 Node.js 下载）
 │   ├── build_portable.ps1        # 便携版一键构建脚本（自动收集依赖、裁剪、打包）
-│   └── .build_gui_cache.json     # GUI 打包工具缓存（Node.js 路径记忆）
+│   └── 启动构建工具.bat          # 一键启动 GUI 打包工具
 ├── dist/                         # Vite 构建产物
 ├── index.html                    # HTML 入口
 ├── vite.config.ts                # Vite 配置
@@ -210,7 +252,7 @@ PCLive/
 
 - **Node.js** >= 18
 - **npm** >= 9
-- **FFmpeg**（可选）：用于 FFmpeg 解码模式，[下载地址](https://ffmpeg.org/download.html)
+- **FFmpeg**：项目已内置（`data/ffmpeg/`），也可在设置中自定义路径；用于 FFmpeg 解码 / 软解转码 / 下载合并
 
 ### 安装依赖
 
@@ -242,7 +284,7 @@ npx electron .
 #### 方式一：Python GUI 打包工具（推荐）
 
 ```bash
-# 双击或命令行运行：
+# 双击 scripts/启动构建工具.bat，或命令行运行：
 python scripts/build_gui.py
 ```
 
@@ -290,10 +332,10 @@ PCLive-portable/PCLive/
 ├── snapshot_blob.bin / v8_context_snapshot.bin  # V8 快照
 ├── locales/                # 语言包（zh-CN, en-US 精简）
 ├── data/                   # 数据文件
-│   ├── sources.json        # 默认直播源配置（37个源）
-│   ├── verified_channels.json  # 本地直播源（69频道）
+│   ├── sources.json        # 默认直播源配置
+│   ├── verified_channels.json  # 本地直播源
 │   ├── ysp_channels.json   # 央视频频道配置
-│   └── cache/              # 原始直播源缓存（37个JSON）
+│   └── cache/              # 原始直播源缓存
 ├── BUILD_INFO.txt          # 构建信息
 └── resources/app/          # 应用程序代码（目录模式，非 asar）
     ├── dist/               # 前端构建产物
@@ -318,7 +360,7 @@ PCLive-portable/PCLive/
 | `V` | 本地视频列表 |
 | `L` | 子线路列表面板 |
 | `Ctrl+Shift+S` | 直播源管理面板 |
-| `Ctrl+Shift+X` | 工具面板（连通性测试 / 链接嗅探） |
+| `Ctrl+Shift+X` | 工具面板（连通性测试 / URL嗅探 / IP查询 / 录屏 / 下载 / 投屏） |
 | `Ctrl+Shift+D` | DLNA 投屏面板 |
 | `Ctrl+,` | 设置面板 |
 | `Esc` | 关闭所有侧边面板 |
@@ -389,15 +431,23 @@ http://example.com/cctv1.m3u8
 
 ## 更新日志
 
+### v1.4.0
+- 官网直播源模块新增 **视频流解析**功能，新增地方频道
+- 新增 **录屏/下载**功能
+- 优化硬解、软解逻辑，内置 FFmpeg 解码
+
+### v1.3.0
+- 新增 **MPV / VLC 外部播放器**支持，可配置路径与一键检测，自动模式下作为软解回退方案
+- 工具箱新增 **IP 查询**标签页
+- 新增 **Webview 全屏填充**工具（`webviewFillScreen.ts`）
+- 新增 **官网直播源模块**，浏览器网页加载播放官方频道，内置CCTV+卫视频道
+
 ### v1.2.0
 - 新增 **本地直播源模块**（`LocalChannelsList.vue`）：CCTV+卫视频道，每频道多线路
 - 本地直播源支持 **逐线路编辑**：添加/修改/删除单条 URL，拖拽移动弹窗，暗色主题
 - 新增 **线路切换**快捷键 `←` / `→`，播放失败自动切换下一线路
-- 新增 `K` 键快速打开/关闭本地直播源列表
-- 新增 **央视频面板**（`YspPanel.vue` / `YspPlayerBar.vue`）和 `ysp_handler.js` 主进程服务
 - 频道排序：CCTV 按数字序、卫视按拼音序，多位置自动保持排序
 - 数据目录 `data/` 完整纳入版本控制（含原始直播源缓存）
-- 修复本地直播源失败/超时不自动切换线路的问题
 - 优化 `.gitignore`：移除 `cache/` 误拦规则，窄化 `*.local` / `_x*` 等通配符
 
 ### v1.1.0
@@ -407,16 +457,12 @@ http://example.com/cctv1.m3u8
 - 新增 **URL 嗅探**功能，可从网页提取视频链接
 - 新增 **广告过滤**功能（AdFilter + 内置规则）
 - 新增 **外挂字幕**支持（SRT/ASS/VTT），字幕样式可自定义
-- 新增 **FFmpeg 解码**模式选项
+- 新增 **外置 FFmpeg 解码**模式选项
 - 新增 **设置面板**：播放、字幕、网络、广告过滤统一管理
 - 新增 **M3U8 净化器**：自动过滤无效/广告片段
 - 新增 **全局 CookieJar**：Node.js 与 Electron net 层共享 Cookie
 - 新增 **AList 爬虫**服务
 - 新增 **音频播放器**模式（纯音频播放）
-- 优化构建脚本：采用 `resources/app/` 目录模式替代 asar 打包，彻底解决 Windows 文件锁定问题
-- 构建脚本支持 `-SkipViteBuild` / `-CleanOnly` 参数，支持增量构建
-- 构建产物自动裁剪 node_modules 冗余文件（.d.ts / .js.map / .md / test/），减小体积
-- 修复已知问题，优化性能与稳定性
 
 ### v1.0.0
 - 初始版本，基础直播播放与管理功能
@@ -438,4 +484,4 @@ http://example.com/cctv1.m3u8
 | HLS.js | Apache 2.0 |
 | mpegts.js | MIT |
 | Vite | MIT |
-| FFmpeg（可选） | LGPL v2.1+ |
+| FFmpeg（内置） | LGPL v2.1+ |

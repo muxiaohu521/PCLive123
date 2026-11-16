@@ -1,0 +1,124 @@
+/* ============ 多工具共用的表单 / 选项 / 操作按钮样式 ============ */
+/* 由 ToolsDialog 外壳一次性全局注入，供录屏、下载、投屏、连通性、URL嗅探等工具共享 */
+
+.tool-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.recording-param-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.param-label {
+  font-size: 13px;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.param-select {
+  width: 100%;
+}
+
+.output-path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.output-path-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: #1e1e2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+  color: #888;
+  font-size: 12px;
+  outline: none;
+  cursor: default;
+}
+
+.browse-btn {
+  padding: 8px 14px;
+  background: #35355a;
+  color: #ccc;
+  border: 1px solid #4fc3f7;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.browse-btn:hover { background: #4a4a7a; }
+
+.recording-info-hint {
+  padding: 12px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+}
+
+.recording-info-hint p {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.6;
+}
+
+.recording-info-hint p:last-child { margin-bottom: 0; color: #ffa726; }
+
+.start-record-btn {
+  align-self: center;
+  width: 200px;
+  margin-top: 8px;
+}
+
+/* 单选模式组（连通性测试 / 下载清理模式共用） */
+.mode-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mode-radio {
+  margin-right: 0 !important;
+  padding: 12px;
+  background: #1e1e2e;
+  border-radius: 8px;
+  border: 1px solid #2a2a3e;
+  width: 100%;
+  height: auto !important;
+}
+
+.mode-radio.is-checked { border-color: #4fc3f7; }
+
+.mode-title {
+  display: block;
+  font-size: 14px;
+  color: #e0e0e0;
+  margin-bottom: 4px;
+}
+
+.mode-desc {
+  display: block;
+  font-size: 12px;
+  color: #777;
+}
+
+/* 结果操作按钮（URL嗅探 / 下载共用） */
+.action-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.play-btn { background: #1b5e20; color: #4caf50; }
+.play-btn:hover { background: #2e7d32; }
+.add-btn { background: #0d47a1; color: #64b5f6; }
+.add-btn:hover { background: #1565c0; }

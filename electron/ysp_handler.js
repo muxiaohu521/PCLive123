@@ -7,6 +7,7 @@
 const { BrowserWindow, session } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { BROWSER_UA } = require('./ua')
 
 // ============ Logger ============
 const LOG_LEVEL = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, VERBOSE: 4 }
@@ -216,9 +217,10 @@ const EXTRACT_CHANNELS_SCRIPT = `
 
 function extractYangshipinChannels() {
   yspLogInfo('start')
-  yspLogDebug('partition=ysp-dom-xxx, timeout=' + SNIFF_TIMEOUT + 'ms')
+  yspLogDebug('partition=ysp-dom, timeout=' + SNIFF_TIMEOUT + 'ms')
   return new Promise((resolve) => {
-    const partitionKey = 'ysp-dom-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+    // 复用固定分区，避免每次提取都新建 in-memory session 造成内存累积（Electron 的 Session 无 close 方法）
+    const partitionKey = 'ysp-dom'
     const yspSession = session.fromPartition(partitionKey, { cache: false })
     yspLogDebug('session: ' + partitionKey)
 
@@ -286,7 +288,7 @@ function extractYangshipinChannels() {
     })
 
     yspWin.loadURL('https://www.yangshipin.cn/tv/home', {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent: BROWSER_UA,
     }).catch(err => {
       if (!resolved) {
         yspLogError('loadURL error: ' + err.message)

@@ -18,11 +18,19 @@
         v-for="(ch, idx) in store.yspChannels"
         :key="idx"
         class="channel-row"
-        @click="playChannel(ch)"
+        :class="{ active: idx === store.yspCurrentChannelIndex }"
+        @click="playChannel(ch, idx)"
       >
         <div class="channel-info">
           <div class="channel-name">{{ ch.name }}</div>
-          <div class="channel-url">{{ ch.url }}</div>
+          <div class="channel-routes">
+            <span
+              v-for="(route, ri) in ch.routes"
+              :key="ri"
+              class="route-tag"
+              :class="{ stream: route.type === 'stream' }"
+            >{{ route.name }}</span>
+          </div>
         </div>
         <div class="channel-actions">
           <el-button link :icon="Edit" size="small" @click.stop="openEditDialog(idx)" />
@@ -37,7 +45,7 @@
     <el-dialog
       v-model="dialogVisible"
       :title="editingIndex >= 0 ? '编辑频道' : '新增频道'"
-      width="480px"
+      width="560px"
       :close-on-click-modal="false"
       destroy-on-close
     >
@@ -45,8 +53,35 @@
         <el-form-item label="名称">
           <el-input v-model="form.name" placeholder="频道显示名称" maxlength="50" />
         </el-form-item>
-        <el-form-item label="地址">
-          <el-input v-model="form.url" placeholder="直播页面URL" />
+        <el-form-item label="线路">
+          <div class="routes-editor">
+            <div
+              v-for="(route, ri) in form.routes"
+              :key="ri"
+              class="route-row"
+            >
+              <el-input
+                v-model="route.name"
+                placeholder="线路名称"
+                size="small"
+                style="width: 120px"
+              />
+              <el-input
+                v-model="route.url"
+                placeholder="直播页面URL"
+                size="small"
+                style="flex: 1"
+              />
+              <el-select v-model="route.type" size="small" style="width: 100px" clearable placeholder="普通">
+                <el-option label="普通网页" value="" />
+                <el-option label="视频流解析" value="stream" />
+              </el-select>
+              <el-button link size="small" @click="removeRoute(ri)" :disabled="form.routes.length <= 1">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+            <el-button size="small" :icon="Plus" @click="addRoute" style="margin-top: 6px">添加线路</el-button>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -64,6 +99,7 @@ import { Plus, Close, FolderOpened, Edit, Delete } from '@element-plus/icons-vue
 import { useAppStore } from '@/store'
 import { logger } from '@/utils/logger'
 import { isElectron as checkIsElectron } from '@/constants'
+import type { YspRoute } from '@/constants'
 
 defineEmits<{ close: [] }>()
 
@@ -71,14 +107,18 @@ const store = useAppStore()
 
 const dialogVisible = ref(false)
 const editingIndex = ref(-1)
-const form = reactive({ name: '', url: '' })
+const form = reactive<{ name: string; routes: YspRoute[] }>({ name: '', routes: [{ name: '', url: '' }] })
 
 const isElectron = computed(() => checkIsElectron())
 
+function resetForm() {
+  form.name = ''
+  form.routes = [{ name: '', url: '' }]
+}
+
 function openAddDialog() {
   editingIndex.value = -1
-  form.name = ''
-  form.url = ''
+  resetForm()
   dialogVisible.value = true
   logger.debug('[YSPanel] open add dialog')
 }
@@ -91,24 +131,42 @@ function openEditDialog(idx: number) {
   }
   editingIndex.value = idx
   form.name = ch.name
-  form.url = ch.url
+  form.routes = (ch.routes && ch.routes.length > 0)
+    ? ch.routes.map((r: YspRoute) => ({ name: r.name, url: r.url, type: r.type || '' }))
+    : [{ name: '', url: '' }]
   dialogVisible.value = true
-  logger.debug(`[YSPanel] open edit dialog idx=${idx} name="${ch.name}"`)
+  logger.debug(`[YSPanel] open edit dialog idx=${idx} name="${ch.name}" routes=${form.routes.length}`)
+}
+
+function addRoute() {
+  form.routes.push({ name: '', url: '' })
+}
+
+function removeRoute(ri: number) {
+  if (form.routes.length <= 1) return
+  form.routes.splice(ri, 1)
 }
 
 async function saveChannel() {
   const name = form.name.trim()
-  const url = form.url.trim()
   if (!name) return ElMessage.warning('请输入频道名称')
-  if (!url) return ElMessage.warning('请输入频道地址')
+
+  // 过滤空URL的路由
+  const validRoutes = form.routes
+    .map((r: YspRoute) => ({ name: r.name.trim() || '未命名', url: r.url.trim(), type: r.type || undefined }))
+    .filter((r: YspRoute) => r.url)
+
+  if (validRoutes.length === 0) return ElMessage.warning('请至少添加一个有效线路')
 
   const isEdit = editingIndex.value >= 0
-  logger.info(`[YSPanel] saving channel: ${isEdit ? 'edit' : 'add'} name="${name}" url="${url.substring(0, 80)}"`)
+  logger.info(`[YSPanel] saving channel: ${isEdit ? 'edit' : 'add'} name="${name}" routes=${validRoutes.length}`)
+
+  const channelData = { name, routes: validRoutes }
 
   if (isEdit) {
-    store.yspChannels[editingIndex.value] = { name, url, pid: '' }
+    store.yspChannels[editingIndex.value] = channelData
   } else {
-    store.yspChannels.push({ name, url, pid: '' })
+    store.yspChannels.push(channelData)
   }
 
   const success = await store.saveYspChannels()
@@ -149,21 +207,8 @@ async function removeChannel(idx: number) {
   logger.info(`[YSPanel] removed channel idx=${idx} name="${ch.name}" remaining=${store.yspChannels.length}`)
 }
 
-function playChannel(ch: { name: string; url: string }) {
-  if (!ch.url) {
-    logger.warn(`[YSPanel] playChannel: empty URL for "${ch.name}"`)
-    ElMessage.warning('频道地址为空')
-    return
-  }
-  logger.info(`[YSPanel] playChannel: opening webview name="${ch.name}" url="${ch.url.substring(0, 80)}"`)
-  // 清除其他播放模式的状态，确保 TitleBar 正确显示"官网直播源"标签
-  store.currentChannel = null
-  store.currentLocalVideo = null
-  store.externalPlayInfo = null
-  store.activeLocalLiveChannelIndex = -1
-  store.activePlayMode = null
-  store.yspWebviewUrl = ch.url
-  store.yspWebviewTitle = ch.name
+function playChannel(_ch: any, idx: number) {
+  store.selectYspChannel(idx)
 }
 
 async function openFileLocation() {
@@ -248,6 +293,9 @@ async function openFileLocation() {
 .channel-row:hover {
   background: rgba(255, 255, 255, 0.04);
 }
+.channel-row.active {
+  background: rgba(79, 195, 247, 0.12);
+}
 
 .channel-info {
   flex: 1;
@@ -264,13 +312,24 @@ async function openFileLocation() {
   text-overflow: ellipsis;
 }
 
-.channel-url {
-  font-size: 11px;
-  color: #666;
+.channel-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.route-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #888;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
+}
+.route-tag.stream {
+  background: rgba(79, 195, 247, 0.15);
+  color: #4fc3f7;
 }
 
 .channel-actions {
@@ -284,5 +343,16 @@ async function openFileLocation() {
   color: #666;
   font-size: 13px;
   padding: 40px 16px;
+}
+
+.routes-editor {
+  width: 100%;
+}
+
+.route-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
 }
 </style>

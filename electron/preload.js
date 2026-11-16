@@ -7,10 +7,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
-
-  getStoreValue: (key) => ipcRenderer.invoke('get-store-value', key),
-  setStoreValue: (key, value) => ipcRenderer.invoke('set-store-value', key, value),
-  deleteStoreValue: (key) => ipcRenderer.invoke('delete-store-value', key),
+  toggleFullscreen: () => ipcRenderer.send('window-toggle-fullscreen'),
+  setFullscreen: (flag) => ipcRenderer.send('window-set-fullscreen', flag),
+  isFullscreen: () => ipcRenderer.invoke('window-get-fullscreen'),
+  onFullscreenChange: (callback) => {
+    const handler = (_event, flag) => callback(flag)
+    ipcRenderer.on('window-fullscreen-changed', handler)
+    return () => ipcRenderer.removeListener('window-fullscreen-changed', handler)
+  },
 
   getSources: () => ipcRenderer.invoke('get-sources'),
   saveSources: (list) => ipcRenderer.sendSync('save-sources', list),
@@ -24,10 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchUrlSpider: (url, headers) => ipcRenderer.invoke('fetch-url-spider', url, headers || {}),
 
   probeStream: (url, headers) => ipcRenderer.invoke('probe-stream', url, headers || {}),
-  createStreamSession: (url, headers, detectedFormat) => ipcRenderer.invoke('create-stream-session', url, headers || {}, detectedFormat || null),
+  probeGatewayFormat: (url, headers) => ipcRenderer.invoke('probe-gateway-format', url, headers || {}),
+  createStreamSession: (url, headers, detectedFormat, preferIpv6) => ipcRenderer.invoke('create-stream-session', url, headers || {}, detectedFormat || null, preferIpv6 || false),
   closeStreamSession: (sessionId) => ipcRenderer.invoke('close-stream-session', sessionId),
   registerVideoHeaders: (domainKey, domainName, headers) => ipcRenderer.invoke('register-video-headers', domainKey, domainName, headers || {}),
   unregisterVideoHeaders: (domainKey) => ipcRenderer.invoke('unregister-video-headers', domainKey),
+  getHardwareDecodeStatus: () => ipcRenderer.invoke('get-hardware-decode-status'),
 
   setNetworkingConfig: (config) => ipcRenderer.invoke('set-networking-config', config || {}),
   clearNetworkingConfig: () => ipcRenderer.invoke('clear-networking-config'),
@@ -46,15 +52,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 央视频 (yangshipin.cn) —— 提取官方频道链接
   yspExtractChannels: () => ipcRenderer.invoke('ysp-extract-channels'),
 
-  createFloatWindow: (videoInfo) => ipcRenderer.invoke('create-float-window', videoInfo),
-  floatWindowUpdate: (videoInfo) => ipcRenderer.invoke('float-window-update', videoInfo),
+  createFloatWindow: (position) => ipcRenderer.invoke('create-float-window', position),
   closeFloatWindow: () => ipcRenderer.invoke('close-float-window'),
-  floatWindowExists: () => ipcRenderer.invoke('float-window-exists'),
+  isFloatWindowOpen: () => ipcRenderer.invoke('is-float-window-open'),
+  getFloatWindowBounds: () => ipcRenderer.invoke('get-float-window-bounds'),
   toggleFloatFullscreen: () => ipcRenderer.invoke('toggle-float-fullscreen'),
-  onFloatVideoUpdate: (callback) => {
+  resizeFloatWindow: (size) => ipcRenderer.invoke('resize-float-window', size),
+  setFloatBounds: (bounds) => ipcRenderer.send('set-float-bounds', bounds),
+  moveFloatWindow: (pos) => ipcRenderer.send('move-float-window', pos),
+  // 悬浮窗「副本播放」源描述同步（主窗口 → 悬浮窗），
+  // 使悬浮窗独立播放与主窗口完全同步的内容（仅 Artplayer 直链源）。
+  floatSourceUpdate: (source) => ipcRenderer.invoke('float-source-update', source),
+  onFloatSourceUpdate: (callback) => {
     const handler = (_event, data) => callback(data)
-    ipcRenderer.on('float-video-update', handler)
-    return () => ipcRenderer.removeListener('float-video-update', handler)
+    ipcRenderer.on('float-source-update', handler)
+    return () => ipcRenderer.removeListener('float-source-update', handler)
   },
 
   // Mirror session - WebRTC signaling relay for float window video mirroring
@@ -75,7 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tlv1Cast: (deviceIndex, videoUrl, options) => ipcRenderer.invoke('tlv1-cast', deviceIndex, videoUrl, options || {}),
   tlv1Stop: (deviceIndex, sessionId) => ipcRenderer.invoke('tlv1-stop', deviceIndex, sessionId),
   tlv1Pause: (deviceIndex, sessionId, currentPosition) => ipcRenderer.invoke('tlv1-pause', deviceIndex, sessionId, currentPosition),
-  tlv1Resume: (deviceIndex, sessionId) => ipcRenderer.invoke('tlv1-resume', deviceIndex, null, sessionId),
+  tlv1Resume: (deviceIndex, sessionId) => ipcRenderer.invoke('tlv1-resume', deviceIndex, sessionId),
   tlv1Seek: (deviceIndex, positionSec, sessionId) => ipcRenderer.invoke('tlv1-seek', deviceIndex, positionSec, sessionId),
   tlv1SyncLocalChannels: (deviceIndex, channelsData) => ipcRenderer.invoke('tlv1-sync-local-channels', deviceIndex, channelsData),
   tlv1GetSubnets: () => ipcRenderer.invoke('tlv1-get-subnets'),
@@ -91,15 +103,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('tlv1:log', handler)
     return () => ipcRenderer.removeListener('tlv1:log', handler)
   },
+  tlv1OpenLogFile: () => ipcRenderer.invoke('tlv1:openLogFile'),
 
   ffmpegSelectPath: () => ipcRenderer.invoke('ffmpeg:selectPath'),
+  ffmpegGetBuiltinPath: () => ipcRenderer.invoke('ffmpeg:getBuiltinPath'),
   ffmpegTest: (ffmpegPath) => ipcRenderer.invoke('ffmpeg:test', ffmpegPath),
-  ffmpegCreateSession: (sourceUrl, headers, ffmpegPath, seekTime, inputFormat) => ipcRenderer.invoke('ffmpeg:createSession', sourceUrl, headers || {}, ffmpegPath, seekTime, inputFormat),
+  ffmpegCreateSession: (sourceUrl, headers, ffmpegPath, seekTime, inputFormat, decodeMode) => ipcRenderer.invoke('ffmpeg:createSession', sourceUrl, headers || {}, ffmpegPath, seekTime, inputFormat, decodeMode),
+  ffmpegSeek: (sessionId, positionSec) => ipcRenderer.invoke('ffmpeg:seek', sessionId, positionSec),
   ffmpegCloseSession: (sessionId) => ipcRenderer.invoke('ffmpeg:closeSession', sessionId),
   onFfmpegStderr: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('ffmpeg:stderr', handler)
     return () => ipcRenderer.removeListener('ffmpeg:stderr', handler)
+  },
+  mpvSelectPath: () => ipcRenderer.invoke('mpv:selectPath'),
+  mpvTest: (mpvPath) => ipcRenderer.invoke('mpv:test', mpvPath),
+  mpvCreateSession: (sourceUrl, headers, mpvPath, seekTime) => ipcRenderer.invoke('mpv:createSession', sourceUrl, headers || {}, mpvPath, seekTime),
+  mpvCloseSession: (sessionId) => ipcRenderer.invoke('mpv:closeSession', sessionId),
+  onMpvPlaybackEnded: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('mpv:playbackEnded', handler)
+    return () => ipcRenderer.removeListener('mpv:playbackEnded', handler)
+  },
+  vlcSelectPath: () => ipcRenderer.invoke('vlc:selectPath'),
+  vlcTest: (vlcPath) => ipcRenderer.invoke('vlc:test', vlcPath),
+  vlcCreateSession: (sourceUrl, headers, vlcPath, seekTime) => ipcRenderer.invoke('vlc:createSession', sourceUrl, headers || {}, vlcPath, seekTime),
+  vlcCloseSession: (sessionId) => ipcRenderer.invoke('vlc:closeSession', sessionId),
+  onVlcPlaybackEnded: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('vlc:playbackEnded', handler)
+    return () => ipcRenderer.removeListener('vlc:playbackEnded', handler)
   },
   onMainDebugLog: (callback) => {
     const handler = (_event, line) => callback(line)
@@ -123,7 +156,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recordingStartStream: (params) => ipcRenderer.invoke('recording:startStream', params),
   recordingWriteChunk: (chunk) => ipcRenderer.invoke('recording:writeChunk', chunk),
   recordingFinishStream: () => ipcRenderer.invoke('recording:finishStream'),
+  recordingPause: () => ipcRenderer.invoke('recording:pause'),
+  recordingResume: () => ipcRenderer.invoke('recording:resume'),
   recordingStatus: () => ipcRenderer.invoke('recording:status'),
+  recordingOpenFolder: (outputPath) => ipcRenderer.invoke('recording:openFolder', outputPath),
+  onRecordingStopped: (callback) => {
+    const handler = (_event, result) => callback(result || {})
+    ipcRenderer.on('recording:stopped', handler)
+    return () => ipcRenderer.removeListener('recording:stopped', handler)
+  },
+
+  // 流下载（多任务并发）
+  downloadSelectFolder: () => ipcRenderer.invoke('download:selectFolder'),
+  downloadStart: (params) => ipcRenderer.invoke('download:start', params),
+  downloadStop: (taskId) => ipcRenderer.invoke('download:stop', taskId),
+  downloadSetMaxConcurrent: (value) => ipcRenderer.invoke('download:setMaxConcurrent', value),
+  downloadStatus: () => ipcRenderer.invoke('download:status'),
+  downloadList: () => ipcRenderer.invoke('download:list'),
+  downloadOpenFolder: (taskId, outputDir) => ipcRenderer.invoke('download:openFolder', taskId, outputDir),
+  onDownloadProgress: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('download:progress', handler)
+    return () => ipcRenderer.removeListener('download:progress', handler)
+  },
+  onDownloadDone: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('download:done', handler)
+    return () => ipcRenderer.removeListener('download:done', handler)
+  },
 
   rendererLog: (msg) => ipcRenderer.send('renderer:log', msg),
+  hasIpv6: () => ipcRenderer.invoke('network:hasIpv6'),
 })

@@ -1,5 +1,5 @@
 ﻿import type Hls from 'hls.js'
-import type { SourceItem } from '@/constants'
+import type { SourceItem, YspRoute } from '@/constants'
 
 interface FileDialogResult {
   filePath?: string
@@ -60,6 +60,8 @@ declare global {
     format?: 'auto' | 'hls' | 'mpegts'
     quality?: 'original' | '1080p' | '720p' | '480p' | '360p'
     position?: number
+    headers?: Record<string, string>
+    inputFormat?: string
   }
 
   interface TlvDevice {
@@ -84,17 +86,51 @@ declare global {
       minimize: () => void
       maximize: () => void
       close: () => void
-      getStoreValue: (key: string) => any
-      setStoreValue: (key: string, value: any) => void
-      deleteStoreValue: (key: string) => Promise<boolean>
+      toggleFullscreen: () => void
+      setFullscreen: (flag: boolean) => void
+      isFullscreen: () => Promise<boolean>
+      onFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void
       fetchUrl: (url: string, headers?: Record<string, string>) => Promise<string>
       fetchUrlSpider: (url: string, headers?: Record<string, string>) => Promise<{ content: string; statusCode: number; headers: Record<string, string>; finalUrl: string }>
 
       probeStream: (url: string, headers?: Record<string, string>) => Promise<{ format: string; contentType: string; finalUrl: string; isPlaylist?: boolean; isFlv?: boolean }>
-      createStreamSession: (url: string, headers?: Record<string, string>, detectedFormat?: string) => Promise<{ sessionId: string; proxyUrl: string; proxyPort: number; detectedFormat?: string; resolvedUrl?: string }>
+      probeGatewayFormat: (url: string, headers?: Record<string, string>) => Promise<{ format: string; contentType: string; finalUrl: string; isPlaylist?: boolean; isFlv?: boolean }>
+      createStreamSession: (url: string, headers?: Record<string, string>, detectedFormat?: string, preferIpv6?: boolean) => Promise<{ sessionId: string; proxyUrl: string; proxyPort: number; detectedFormat?: string; resolvedUrl?: string }>
       closeStreamSession: (sessionId: string) => Promise<boolean>
       registerVideoHeaders: (domainKey: string, domainName: string, headers: Record<string, string>) => Promise<boolean>
       unregisterVideoHeaders: (domainKey: string) => Promise<boolean>
+      getHardwareDecodeStatus: () => Promise<{
+        videoDecode: string
+        hardwareAccelerated: boolean
+        decodeEngine: string
+        decodeApi: string
+        engineTier: string
+        preferredEngine: string
+        preferredTier: string
+        actualEngine: string
+        actualAdapter: string
+        engineMatched: boolean
+        gpuVendor: string
+        gpuDeviceId: string
+        driverVersion: string
+        adapters: Array<{
+          name: string
+          driverVersion: string
+          vendor: string
+          deviceId?: string
+          active: boolean
+          engine: string
+          tier: string
+        }>
+        systemAdapters: Array<{
+          name: string
+          driverVersion: string
+          vendor: string
+          engine: string
+          tier: string
+          active: boolean
+        }>
+      }>
 
       setNetworkingConfig: (config: NetworkingConfig) => Promise<boolean>
       clearNetworkingConfig: () => Promise<boolean>
@@ -119,20 +155,24 @@ declare global {
       openDirectory: () => Promise<{ directoryPath: string } | null>
       scanVideoDirectory: () => Promise<{ directoryPath: string; files: { name: string; filePath: string; size: number }[] } | null>
       getSources: () => Promise<SourceItem[]>
-      saveSources: (list: SourceItem[]) => Promise<boolean>
+      saveSources: (list: SourceItem[]) => boolean
       getSourcesPath: () => Promise<string>
       getChannelCacheEntry: (url: string) => Promise<Record<string, any> | null>
       setChannelCacheEntry: (url: string, entry: Record<string, any>) => Promise<boolean>
       deleteChannelCacheEntry: (url: string) => Promise<boolean>
       clearChannelCache: () => Promise<boolean>
       sniffUrl: (pageUrl: string) => Promise<SniffResponse>
-      resolvePlayUrl: (siteMeta: { site: string; bvid?: string; cid?: number; pid?: string; aid?: number; title?: string; pageUrl?: string }) => Promise<{ success: boolean; urls: { url: string; format: string; isLive: boolean }[]; error?: string }>
-      createFloatWindow: (videoInfo?: { url: string; headers?: Record<string, string>; format?: string; title?: string; currentTime?: number; playing?: boolean }) => Promise<boolean>
-      floatWindowUpdate: (videoInfo: { url: string; headers?: Record<string, string>; format?: string; title?: string; currentTime?: number; playing?: boolean }) => Promise<void>
+      resolvePlayUrl: (siteMeta: { site: string; bvid?: string; cid?: number; pid?: string; aid?: number; title?: string; pageUrl?: string; forceRefresh?: boolean }) => Promise<{ success: boolean; urls: { url: string; format: string; isLive: boolean; headers?: Record<string, string> }[]; error?: string }>
+      createFloatWindow: (position?: { x: number; y: number }) => Promise<boolean>
       closeFloatWindow: () => Promise<void>
-      floatWindowExists: () => Promise<boolean>
-      toggleFloatFullscreen: () => Promise<void>
-      onFloatVideoUpdate: (callback: (data: { url: string; headers: Record<string, string>; format: string; title: string; currentTime?: number; playing?: boolean }) => void) => () => void
+      isFloatWindowOpen: () => Promise<boolean>
+      getFloatWindowBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>
+      toggleFloatFullscreen: () => Promise<boolean>
+      resizeFloatWindow: (size: { width: number; height: number }) => Promise<boolean>
+      setFloatBounds: (bounds: { x: number; y: number; width: number; height: number }) => void
+      moveFloatWindow: (pos: { x: number; y: number; width?: number; height?: number }) => void
+      floatSourceUpdate: (source: { type: 'none' | 'stream'; url?: string; headers?: Record<string, string>; format?: string }) => Promise<boolean>
+      onFloatSourceUpdate: (callback: (data: { type: 'none' | 'stream'; url?: string; headers?: Record<string, string>; format?: string }) => void) => () => void
 
       mirrorSignal: (data: any) => Promise<void>
       onMirrorSignal: (callback: (data: any) => void) => () => void
@@ -158,12 +198,27 @@ declare global {
       tlv1SetAdbPath: (path: string | null) => Promise<{ success: boolean; error?: string }>
       tlv1GetAdbPath: () => Promise<{ success: boolean; path: string; isOverride: boolean }>
       tlv1OnLog: (callback: (log: { level: string; msg: string; data?: any; time: string }) => void) => () => void
+      tlv1OpenLogFile: () => Promise<{ success: boolean; path?: string; error?: string }>
 
       ffmpegSelectPath: () => Promise<{ success: boolean; path: string }>
+      ffmpegGetBuiltinPath: () => Promise<string>
       ffmpegTest: (ffmpegPath: string) => Promise<{ success: boolean; version: string; error?: string }>
-      ffmpegCreateSession: (sourceUrl: string, headers: Record<string, string>, ffmpegPath: string, seekTime?: number, inputFormat?: string) => Promise<{ success: boolean; sessionId?: string; proxyUrl?: string; port?: number; detectedFormat?: string; duration?: number; error?: string }>
+      ffmpegCreateSession: (sourceUrl: string, headers: Record<string, string>, ffmpegPath: string, seekTime?: number, inputFormat?: string, decodeMode?: string) => Promise<{ success: boolean; sessionId?: string; proxyUrl?: string; port?: number; detectedFormat?: string; duration?: number; error?: string }>
+      ffmpegSeek: (sessionId: string, positionSec: number) => Promise<{ success: boolean; sessionId?: string; proxyUrl?: string; duration?: number; error?: string }>
       ffmpegCloseSession: (sessionId: string) => Promise<boolean>
       onFfmpegStderr: (callback: (data: { sessionId: string; line: string }) => void) => () => void
+      mpvSelectPath: () => Promise<{ success: boolean; path: string }>
+      mpvTest: (mpvPath: string) => Promise<{ success: boolean; version: string; error?: string }>
+      mpvCreateSession: (sourceUrl: string, headers: Record<string, string>, mpvPath: string, seekTime?: number) => Promise<{ success: boolean; sessionId?: string; error?: string }>
+      mpvCloseSession: (sessionId: string) => Promise<boolean>
+      onMpvPlaybackEnded: (callback: (data: { sessionId: string; exitCode: number }) => void) => () => void
+
+      vlcSelectPath: () => Promise<{ success: boolean; path: string }>
+      vlcTest: (vlcPath: string) => Promise<{ success: boolean; version: string; error?: string }>
+      vlcCreateSession: (sourceUrl: string, headers: Record<string, string>, vlcPath: string, seekTime?: number) => Promise<{ success: boolean; sessionId?: string; error?: string }>
+      vlcCloseSession: (sessionId: string) => Promise<boolean>
+      onVlcPlaybackEnded: (callback: (data: { sessionId: string; exitCode: number }) => void) => () => void
+
       onMainDebugLog: (callback: (line: string) => void) => () => void
 
       serveLocalFile: (filePath: string) => Promise<{ success: boolean; token?: string; proxyUrl?: string; error?: string }>
@@ -181,20 +236,92 @@ declare global {
       // 央视频 (yangshipin.cn) —— 提取官方频道链接
       yspExtractChannels: () => Promise<YspChannelsResult>
 
-      // 录屏（基于 video.captureStream()，直接从 video 元素抓取原始画面+音频）
+      // 录屏（主窗口直录：从统一流接口取 <video> MediaStream，MediaRecorder 编码写入）
       recordingSelectOutput: () => Promise<{ success: boolean; path: string }>
-      recordingStartStream: (params: { outputPath: string }) => Promise<{ success: boolean; error?: string }>
+      recordingStartStream: (params: { outputPath?: string }) => Promise<{ success: boolean; error?: string; outputPath?: string }>
       recordingWriteChunk: (chunk: ArrayBuffer) => Promise<{ success: boolean }>
       recordingFinishStream: () => Promise<{ success: boolean; error?: string; elapsed?: string; totalBytes?: number; outputPath?: string }>
-      recordingStatus: () => Promise<{ recording: boolean; elapsed?: number; totalBytes?: number; outputPath?: string }>
+      recordingPause: () => Promise<{ success: boolean; error?: string }>
+      recordingResume: () => Promise<{ success: boolean; error?: string }>
+      recordingStatus: () => Promise<{ recording: boolean; paused?: boolean; elapsed?: number; totalBytes?: number; outputPath?: string }>
+      recordingOpenFolder: (outputPath?: string) => Promise<{ success: boolean; error?: string; directoryPath?: string }>
+      onRecordingStopped: (callback: (result: { elapsed?: string; totalBytes?: number; outputPath?: string }) => void) => () => void
+
+      // 流下载（多任务并发）
+      downloadSelectFolder: () => Promise<{ success: boolean; directoryPath: string }>
+      downloadStart: (params: { url: string; headers?: Record<string, string>; outputDir?: string; cleanupMode?: 'manual' | 'auto'; title?: string }) => Promise<{ success: boolean; error?: string; skipped?: boolean; reason?: string; id?: number; queued?: boolean; maxConcurrent?: number }>
+      downloadStop: (taskId?: number) => Promise<{ success: boolean; error?: string }>
+      downloadSetMaxConcurrent: (value: number) => Promise<{ success: boolean; error?: string; maxConcurrent?: number }>
+      downloadOpenFolder: (taskId?: number, outputDir?: string) => Promise<{ success: boolean; error?: string; directoryPath?: string }>
+      downloadList: () => Promise<{ success: boolean; maxConcurrent: number; tasks: DownloadTaskInfo[] }>
+      downloadStatus: () => Promise<{
+        success: boolean
+        maxConcurrent: number
+        activeCount: number
+        tasks: DownloadTaskInfo[]
+      }>
+      onDownloadProgress: (callback: (data: DownloadProgressInfo) => void) => () => void
+      onDownloadDone: (callback: (data: DownloadDoneInfo) => void) => () => void
+
       rendererLog: (msg: string) => void
+      hasIpv6: () => Promise<boolean>
     }
+  }
+
+  interface DownloadTaskInfo {
+    id: number
+    status: 'queued' | 'downloading' | 'merging' | 'done'
+    active: boolean
+    merging: boolean
+    done: boolean
+    success: boolean
+    reason: string
+    error: string
+    elapsed: number
+    segmentCount: number
+    totalBytes: number
+    outputFile: string
+    outputDir: string
+    segmentsDir: string
+    cleanupMode: string
+    title: string
+    url: string
+  }
+
+  interface DownloadProgressInfo {
+    id: number
+    status: 'queued' | 'downloading' | 'merging' | 'done'
+    active: boolean
+    merging: boolean
+    elapsed: number
+    segmentCount: number
+    totalBytes: number
+    phase: string
+    currentSegment: string
+    title: string
+    url: string
+    outputDir: string
+    segmentsDir: string
+  }
+
+  interface DownloadDoneInfo {
+    id: number
+    success: boolean
+    error: string
+    reason: string
+    outputFile: string
+    outputDir: string
+    segmentsDir: string
+    segmentCount: number
+    totalBytes: number
+    cleanupMode: string
+    title: string
+    url: string
   }
 
   interface YspChannelItem {
     name: string
-    pid: string
-    url: string
+    routes: YspRoute[]
   }
 
   interface YspChannelsData {

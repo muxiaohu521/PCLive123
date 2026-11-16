@@ -436,6 +436,7 @@ function parseTxt(str: string): JsonObject[] {
   const lines = str.replace(/\r\n/g, '\n').replace(/\r/g, '').split('\n')
   let curGroup: JsonObject | null = null
   let pendingMeta: Record<string, unknown> = {}
+  let urlLineCounter = 0
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!line) continue
@@ -445,12 +446,40 @@ function parseTxt(str: string): JsonObject[] {
       pendingMeta = {}
       continue
     }
-    const split = line.includes(',') ? line.split(',', 2) : line.split('\t', 2)
-    if (split.length < 2) continue
+
+    // Detect separator: full-width comma -> half-width comma -> tab
+    const hasFullComma = line.includes('\uff0c')
+    const hasComma = line.includes(',')
+    const hasTab = line.includes('\t')
+
+    let parts: string[]
+    if (hasFullComma) {
+      parts = line.split('\uff0c', 2)
+    } else if (hasComma) {
+      parts = line.split(',', 2)
+    } else if (hasTab) {
+      parts = line.split('\t', 2)
+    } else {
+      // Pure URL line without separator
+      if (isUrl(line)) {
+        if (!curGroup) curGroup = findGroup(groups, DEFAULT_GROUP)
+        const ch: JsonObject = { name: `Line_${++urlLineCounter}` }
+        mergeMeta(ch, pendingMeta)
+        ch.urls = [sanitizeUrl(line.split(/\s+/)[0])]
+        addChannel(curGroup, ch)
+        pendingMeta = {}
+      }
+      continue
+    }
+
+    if (parts.length < 2) continue
+    const name = parts[0].trim()
+    if (!name || name.startsWith('#')) continue
+
     if (!curGroup) curGroup = findGroup(groups, DEFAULT_GROUP)
-    const channel: JsonObject = { name: split[0].trim() }
+    const channel: JsonObject = { name }
     mergeMeta(channel, pendingMeta)
-    const urlPart = split[1].trim()
+    const urlPart = parts[1].trim()
     const urls: string[] = []
     for (const part of urlPart.split('#')) {
       const rawUrl = part.trim()

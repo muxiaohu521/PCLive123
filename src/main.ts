@@ -16,23 +16,24 @@ import {
   Plus,
 } from '@element-plus/icons-vue'
 import App from './App.vue'
+import { logger } from '@/utils/logger'
 
 window.addEventListener('error', (e) => {
-  console.error('[FATAL] window.onerror:', e.message, e.filename, e.lineno, e.colno, e.error)
+  logger.error('[FATAL] window.onerror:', e.message, e.filename, e.lineno, e.colno, e.error)
 })
 window.addEventListener('unhandledrejection', (e) => {
-  console.error('[FATAL] unhandledrejection:', e.reason)
+  logger.error('[FATAL] unhandledrejection:', e.reason)
 })
 
 const app = createApp(App)
 const pinia = createPinia()
 
 app.config.errorHandler = (err, instance, info) => {
-  console.error('[VUE-ERROR]', err, 'component:', instance?.$options?.name, 'info:', info)
+  logger.error('[VUE-ERROR]', err, 'component:', instance?.$options?.name, 'info:', info)
 }
 
 app.config.warnHandler = (msg, instance, trace) => {
-  console.warn('[VUE-WARN]', msg, 'component:', instance?.$options?.name, trace)
+  logger.warn('[VUE-WARN]', msg, 'component:', instance?.$options?.name, trace)
 }
 
 app.use(pinia)

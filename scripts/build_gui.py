@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PCLive1.3 EXE 打包工具 (GUI)
+PCLive1.4 EXE 打包工具 (GUI)
 - 自动检测/下载 Node.js
 - 支持便携版 (解压即用) 和 NSIS 安装版
 - 参考 TVLive1.1 build_gui.py 架构
@@ -20,7 +20,7 @@ import ssl
 import urllib.request
 import urllib.error
 
-VERSION = "1.0.0"
+VERSION = "1.4.0"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, '..'))
 TOOLS_DIR = os.path.join(PROJECT_ROOT, 'tools')
@@ -282,7 +282,7 @@ class BuildRunner(threading.Thread):
 
         # 打印头部信息
         self._log("=" * 60, "header")
-        self._log(f"PCLive1.3 打包工具 v{VERSION}", "header")
+        self._log(f"PCLive1.4 打包工具 v{VERSION}", "header")
         self._log(f"构建类型: {BUILD_TYPES[self.build_type]['desc']}", "header")
         self._log(f"Node.js:  {self.node_bin}  (v{_get_node_version(self.node_bin)})", "header")
         self._log(f"跳过前端: {'是' if self.skip_vite else '否'}", "header")
@@ -424,7 +424,7 @@ def _walk_files(root):
 class BuildGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"PCLive1.3 EXE 打包工具 v{VERSION}")
+        self.title(f"PCLive1.4 EXE 打包工具 v{VERSION}")
         self.geometry("860x720")
         self.minsize(700, 580)
         self.resizable(True, True)
@@ -531,7 +531,7 @@ class BuildGUI(tk.Tk):
         bottom.pack(fill=tk.X, pady=(3, 0))
         self.status_label = ttk.Label(bottom, text="就绪")
         self.status_label.pack(side=tk.LEFT)
-        ttk.Label(bottom, text=f"v{VERSION} · PCLive1.3 Electron 打包", foreground="gray").pack(side=tk.RIGHT)
+        ttk.Label(bottom, text=f"v{VERSION} · PCLive1.4 Electron 打包", foreground="gray").pack(side=tk.RIGHT)
 
     # ── 自动检测 ──
 
